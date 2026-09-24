@@ -378,18 +378,19 @@ async function startServer() {
   async function proxyLiveFlv(req: express.Request, res: express.Response, vehicle: any, channelNum: number) {
     const { uid, rid } = res.locals.liveUser;
     const requestAudio = String(req.query.audio ?? '1') !== '0';
+    const streamType = String(req.query.stream ?? '1') === '0' ? '0' : '1';
     const query = new URLSearchParams({
       key: wcmsLiveToken(uid, rid),
       terid: String(vehicle.deviceId),
       chl: String(channelNum),
       audio: requestAudio ? '1' : '0',
-      st: '1',
+      st: streamType,
       port: String(process.env.CEIBA_FLV_PORT || '12060'),
       dt: 'mdvr'
     });
     const infoUrl = `http://127.0.0.1:${process.env.CEIBA_WEB_PORT || '12056'}/api/v1/basic/live/video?${query}`;
     const controller = new AbortController();
-    let timeout = setTimeout(() => controller.abort(new Error('Tiempo de espera del CMS agotado')), 35000);
+    let timeout = setTimeout(() => controller.abort(new Error('Tiempo de espera del CMS agotado')), 20000);
     const touch = () => {
       clearTimeout(timeout);
       timeout = setTimeout(() => controller.abort(new Error('El CMS dejó de enviar datos')), 25000);
@@ -524,13 +525,14 @@ async function startServer() {
     } catch {}
     if (!deviceId) return res.status(503).json({ error: 'No se encontró el identificador MDVR en el CMS' });
     const requestAudio = String(req.query.audio ?? '1') === '1';
+    const streamType = String(req.query.stream ?? '1') === '0' ? '0' : '1';
     const liveUrl = `/api/vehicles/${vehicle.id}/live/${channelNum}`;
     const streamToken = jwt.sign(
       { uid: res.locals.liveUser.uid, rid: res.locals.liveUser.rid, live: true, vehicleId: String(vehicle.id), channel: channelNum },
       JWT_SECRET,
       { algorithm: 'HS256', expiresIn: '2m' }
     );
-    const flvUrl = `${liveUrl}?audio=${requestAudio ? '1' : '0'}&access_token=${encodeURIComponent(streamToken)}`;
+    const flvUrl = `${liveUrl}?audio=${requestAudio ? '1' : '0'}&stream=${streamType}&access_token=${encodeURIComponent(streamToken)}`;
 
     res.json({
       vehicleId: vehicle.id,
@@ -547,7 +549,10 @@ async function startServer() {
     });
   });
 
-  app.get('/api/geofences', (req, res) => { res.json(getGeofences()); });
+  app.get('/api/geofences', requireAppAuth, async (_req, res) => {
+    try { res.json(await getGeofences()); }
+    catch { res.status(503).json({ error: 'No se pudieron cargar las geocercas' }); }
+  });
   app.get('/api/alerts', (req, res) => { res.json(getAlerts()); });
   app.get('/api/gps-track/:unitId', (req, res) => {
     const unitId = req.params.unitId;

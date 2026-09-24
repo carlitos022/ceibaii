@@ -1,19 +1,16 @@
 import { Vehicle, AlertItem, Geofence, LibraryRecord, DownloadJob } from '../src/types';
-import { INITIAL_VEHICLES, INITIAL_GEOFENCES, INITIAL_ALERTS, INITIAL_LIBRARY, INITIAL_DOWNLOADS } from './mock-data';
 import { executeQuery, ensureTrackerEventsTable, isDbConnected } from './db';
 import fs from 'fs';
 import path from 'path';
 
 const LAST_GPS_PATH = 'C:/Program Files (x86)/CMS Server/TransmitServer/AlarmServer/LastGps.txt';
-const ONLINE_THRESHOLD_SEC = 600; // 10 min - permite reportes cada 5-8 min sin marcar offline indebido (ajustado para operación nocturna)
+const ONLINE_THRESHOLD_SEC = Number(process.env.GPS_FRESHNESS_SECONDS || 600);
 const ARMS_API_URL = 'http://127.0.0.1:12040'; // Ceiba II ARMS API para estado de dispositivos
 
-// Real state from DB/GPS, fallback to memory mock only when DB offline
+// Telemetría real desde la base de datos y el último reporte GPS
 let vehiclesState: Vehicle[] = [];
-let geofencesState: Geofence[] = JSON.parse(JSON.stringify(INITIAL_GEOFENCES));
-let alertsState: AlertItem[] = JSON.parse(JSON.stringify(INITIAL_ALERTS));
-let libraryState: LibraryRecord[] = JSON.parse(JSON.stringify(INITIAL_LIBRARY));
-let downloadsState: DownloadJob[] = JSON.parse(JSON.stringify(INITIAL_DOWNLOADS));
+let alertsState: AlertItem[] = [];
+let downloadsState: DownloadJob[] = [];
 
 type Snapshot = Pick<Vehicle, 'status' | 'ignition' | 'geofence' | 'speed' | 'lat' | 'lng' | 'route' | 'lastUpdate'>;
 
@@ -49,10 +46,10 @@ function readLastGps(): any[] {
   } catch { return []; }
 }
 
-function mapVehicleStatus(speed: number, online: boolean, ignition: boolean): Vehicle['status'] {
+function mapVehicleStatus(speed: number, online: boolean, hasFreshGps: boolean): Vehicle['status'] {
   if (!online) return 'offline';
-  if (speed > 5) return 'moving';
-  return 'stopped'; // en línea pero sin movimiento = detenido (ignora ignición)
+  if (!hasFreshGps) return 'online';
+  return speed > 5 ? 'moving' : 'stopped';
 }
 
 function parseQuitoDate(value: string): Date {
@@ -171,7 +168,7 @@ async function recordHistoricEvents(vehicles: Vehicle[]) {
           candidates.push(makeEvent(v, 'geofence_exit', `${v.unitNumber} salió de ${prev.geofence}`, `La unidad ${v.unitNumber} salió de ${prev.geofence} y siguió hacia ${location}.`, 'geofence', { from: prev.geofence, to: v.geofence || null }));
         }
         if (!prev.geofence && v.geofence) {
-          candidates.push(makeEvent(v, 'geofence_entry', `${v.unitNumber} entró a ${v.geofence}`, `La unidad ${v.unitNumber} entró a ${v.geofence} en las coordenadas ${v.lat.toFixed(6)}, ${v.lng.toFixed(6)}.`, 'geofence', { to: v.geofence }));
+          candidates.push(makeEvent(v, 'geofence_entry', `${v.unitNumber} entró a ${v.geofence}`, `La unidad ${v.unitNumber} entró a ${v.geofence} en las coordenadas ${v.lat?.toFixed(6) ?? 'sin GPS'}, ${v.lng?.toFixed(6) ?? 'sin GPS'}.`, 'geofence', { to: v.geofence }));
         }
         if (prev.geofence && v.geofence && prev.geofence !== v.geofence) {
           candidates.push(makeEvent(v, 'geofence_entry', `${v.unitNumber} entró a ${v.geofence}`, `La unidad ${v.unitNumber} salió de ${prev.geofence} y entró a ${v.geofence}.`, 'geofence', { from: prev.geofence, to: v.geofence }));
@@ -297,40 +294,36 @@ async function loadVehiclesFromRealSource() {
       });
     }
     const mapped: Vehicle[] = rows.map((r: any, idx: number) => {
-       const chCount = parseInt(r.channelcount) || 4;
-       const chEnable = r.channelenable === -1 ? (Math.pow(2, chCount) - 1).toString(2) : (r.channelenable || 15).toString(2);
+       const chCount = Math.max(0, parseInt(r.channelcount, 10) || 0);
+       const enabledMask = r.channelenable === -1 ? (2 ** chCount - 1) : Number(r.channelenable ?? 0);
        const chNames = r.channelname ? String(r.channelname).split(',') : [];
        const isOnlineFromARMS = onlineDevices.has(String(r.deviceno).trim());
        const channels = [];
       for (let j = 0; j < chCount; j++) {
-        if (chEnable.charAt(chEnable.length - j - 1) === '0') continue;
-        channels.push({ id: j + 1, channelNumber: j + 1, name: chNames[j] ? `${chNames[j]} [${j + 1}]` : `Cámara ${j + 1} [${j + 1}]`, status: isOnlineFromARMS ? 'live' as const : 'offline' as const, resolution: j < 2 ? '1080P' : '720P', fps: j < 2 ? 25 : 20, bitrate: j < 2 ? '2048 Kbps' : '1024 Kbps' });
-      }
-      if (channels.length === 0) {
-        for (let j = 1; j <= chCount; j++) channels.push({ id: j, channelNumber: j, name: `Cámara ${j} [${j}]`, status: isOnlineFromARMS ? 'live' : 'offline', resolution: j < 3 ? '1080P' : '720P', fps: j < 3 ? 25 : 20, bitrate: '2048 Kbps' });
+        if (!(enabledMask & (1 << j))) continue;
+        channels.push({ id: j + 1, channelNumber: j + 1, name: chNames[j] ? `${chNames[j]} [${j + 1}]` : `Cámara ${j + 1} [${j + 1}]`, status: isOnlineFromARMS ? 'buffering' as const : 'offline' as const, resolution: '', fps: 0, bitrate: '' });
       }
       const prevVehicle = vehiclesState.find(v => v.id === String(r.id));
       const g = gpsMap.get(r.deviceno);
-      let lat = prevVehicle ? prevVehicle.lat : -3.9928;
-      let lng = prevVehicle ? prevVehicle.lng : -79.2845;
-      let speed = 0, heading = prevVehicle ? prevVehicle.heading : 0, lastUpdate = prevVehicle ? prevVehicle.lastUpdate : formatQuito(new Date()), ignition = prevVehicle ? prevVehicle.ignition : false, status: Vehicle['status'] = 'offline';
+      let lat = prevVehicle?.lat ?? null;
+      let lng = prevVehicle?.lng ?? null;
+      let speed = 0, heading = prevVehicle ? prevVehicle.heading : 0, lastUpdate = prevVehicle?.lastUpdate || '', ignition = prevVehicle ? prevVehicle.ignition : false, status: Vehicle['status'] = 'offline';
       let trail: [number, number][] | undefined = prevVehicle?.trail ? [...prevVehicle.trail] : undefined;
-      let hasGps = false;
-      
-      // Usar la API ARMS para determinar si el dispositivo está online
-       if (g && !isNaN(g.lat) && !isNaN(g.lng)) {
-        hasGps = true;
+      const validGps = g && Number.isFinite(g.lat) && Number.isFinite(g.lng) && Math.abs(g.lat) <= 90 && Math.abs(g.lng) <= 180 && (g.lat !== 0 || g.lng !== 0);
+      const freshGps = validGps && Number.isFinite(Number(g.timestamp)) && nowSec - Number(g.timestamp) >= -30 && nowSec - Number(g.timestamp) <= ONLINE_THRESHOLD_SEC;
+      if (validGps) {
         lat = g.lat; lng = g.lng; speed = g.speed; heading = g.heading; ignition = g.ignition;
-        lastUpdate = formatQuitoFromTs(g.timestamp);
+        lastUpdate = g.timestamp ? formatQuitoFromTs(g.timestamp) : (prevVehicle?.lastUpdate || '');
         // Usar el estado de ARMS en lugar de la lógica de tiempo
-        status = mapVehicleStatus(speed, isOnlineFromARMS, ignition);
-        if (prevVehicle && prevVehicle.trail) trail = [...prevVehicle.trail.slice(-20), [lat, lng] as [number, number]];
-        else trail = [[lat, lng] as [number, number]];
+        status = mapVehicleStatus(speed, isOnlineFromARMS, freshGps);
+        if (freshGps && prevVehicle?.lastUpdate !== lastUpdate) {
+          trail = [...(prevVehicle?.trail || []).slice(-20), [lat, lng] as [number, number]];
+        }
         // Si está offline, conservar última velocidad 0 pero mantener trail
-        if (status === 'offline') speed = 0;
+        if (status === 'offline' || !freshGps) speed = 0;
       } else {
         // Sin GPS en este ciclo: usar el estado de ARMS
-         status = isOnlineFromARMS ? 'online' : 'offline';
+         status = mapVehicleStatus(0, isOnlineFromARMS, false);
         speed = 0;
         // Mantener trail previo
       }
@@ -342,9 +335,10 @@ async function loadVehiclesFromRealSource() {
              ? 'Conectado'
              : 'Sin conexión';
       const relativeTime = (()=>{ 
-        const ts = g && g.timestamp ? g.timestamp : (prevVehicle ? (new Date(prevVehicle.lastUpdate.replace(' ','T')).getTime()/1000) : 0);
+        const ts = validGps ? Number(g.timestamp) : 0;
         if (!ts) return 'sin reporte';
         const diff = Math.round(nowSec - ts);
+        if(diff<0) return 'reloj GPS adelantado';
         if(diff<60) return `hace ${diff}s`;
         if(diff<3600) return `hace ${Math.round(diff/60)} min`;
         if(diff<86400) return `hace ${Math.round(diff/3600)}h`;
@@ -357,24 +351,24 @@ async function loadVehiclesFromRealSource() {
         status,
         statusText,
         speed,
-        lat: Number(lat.toFixed(6)),
-        lng: Number(lng.toFixed(6)),
+        lat: lat === null ? null : Number(lat.toFixed(6)),
+        lng: lng === null ? null : Number(lng.toFixed(6)),
         heading,
         route: r.groupname || '',
         geofence: '',
         lastUpdate,
         relativeTime,
-         camerasOnline: isOnlineFromARMS ? `${channels.length}/${chCount} Online` : `0/${chCount} Offline`,
-         camerasCount: isOnlineFromARMS ? channels.length : 0,
+         camerasOnline: isOnlineFromARMS ? `MDVR conectado • ${channels.length} canales configurados` : 'MDVR sin conexión',
+         camerasCount: 0,
         camerasTotal: chCount,
-        driverName: r.groupname || undefined,
+        driverName: undefined,
         ignition,
-         mileageKm: prevVehicle?.mileageKm || 0,
-         fuelLevelPct: prevVehicle?.fuelLevelPct || 0,
-         engineTempC: prevVehicle?.engineTempC || 0,
-         batteryVolts: prevVehicle?.batteryVolts || 0,
-         altitudeMeters: g ? g.altitude : (prevVehicle?.altitudeMeters || 0),
-         satellites: g ? (prevVehicle?.satellites || 0) : (prevVehicle?.satellites || 0),
+         mileageKm: null,
+         fuelLevelPct: null,
+         engineTempC: null,
+         batteryVolts: null,
+         altitudeMeters: validGps ? g.altitude : null,
+         satellites: null,
         channels,
         trail
       };
@@ -401,8 +395,18 @@ export function getVehicleById(idOrUnitNumber: string): Vehicle | undefined {
   return vehiclesState.find(v => v.id === idOrUnitNumber || v.unitNumber === idOrUnitNumber);
 }
 
-export function getGeofences(): Geofence[] {
-  return geofencesState;
+export async function getGeofences(): Promise<Geofence[]> {
+  const rows = await getGeofencesReal();
+  return rows.flatMap((row: any) => {
+    const points = String(row.KeyPoints || '').split(',').map(Number);
+    const lat = points[0], lng = points[1];
+    if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180 || (!lat && !lng)) return [];
+    const radius = Number(row.Radius);
+    if (!Number.isFinite(radius) || radius <= 0) return [];
+    return [{ id: String(row.FenceID), name: String(row.FenceCode || row.FenceID), type: 'terminal' as const,
+      typeLabel: 'Geocerca', coordinates: [] as [number, number][], center: [lat, lng] as [number, number],
+      radiusMeters: radius, activeUnitsCount: 0, alertOnEntry: false, alertOnExit: false, color: '#f59e0b' }];
+  });
 }
 // Real fences fetch is done via client proxy to miritrans; server keeps mock as fallback but we expose real via separate function for future
 export async function getGeofencesReal(): Promise<any[]> {

@@ -15,7 +15,6 @@ import { EvidenceTrackerView } from './components/EvidenceTrackerView';
 import { SettingsModal } from './components/SettingsModal';
 import { VideoPreviewModal } from './components/VideoPreviewModal';
 import { VueltasView } from './components/VueltasView';
-import { INITIAL_GEOFENCES, INITIAL_ALERTS, INITIAL_LIBRARY, INITIAL_DOWNLOADS } from './fallbackMock';
 import { User, Lock, ArrowRight } from 'lucide-react';
 
 interface AuthState {
@@ -133,7 +132,7 @@ export default function App() {
       // Never replace a selection made while the initial request was in flight.
       setSelectedVehicle(previous => previous
          ? vehData.find((v: Vehicle) => v.id === previous.id) || null
-        : vehData.find((v: Vehicle) => v.unitNumber === '03_LAA4015') || vehData[0] || null);
+        : null);
     } catch (err) {
       console.error('Error fetching fleet data:', err);
       setVehicles([]);
@@ -519,7 +518,7 @@ export default function App() {
           <div className="bg-[#000f20]/90 backdrop-blur-md border-b border-[#293a50] px-2 sm:px-4 py-2 flex flex-wrap items-center gap-2 text-[11px] font-mono flex-shrink-0">
             <span className="px-2 py-1 rounded bg-slate-800/80 border border-slate-700 text-slate-300">Total: <b className="text-white">{liveStats.total}</b></span>
             <span className="px-2 py-1 rounded bg-emerald-950/50 border border-emerald-700 text-emerald-300">En Línea: <b>{liveStats.online}</b></span>
-            <span className="px-2 py-1 rounded bg-slate-800 border border-slate-600 text-slate-400">Apagadas: <b>{liveStats.offline}</b></span>
+            <span className="px-2 py-1 rounded bg-slate-800 border border-slate-600 text-slate-400">Sin conexión: <b>{liveStats.offline}</b></span>
             <span className="px-2 py-1 rounded bg-orange-950/40 border border-orange-700 text-orange-300">En Movimiento: <b>{liveStats.moving}</b></span>
             <span className="px-2 py-1 rounded bg-red-950/40 border border-red-700 text-red-300">Detenidas: <b>{liveStats.stopped}</b></span>
             <span className="ml-auto text-[10px] text-slate-500 hidden sm:inline">GPS cada 2.5s • Video en vivo y audio AAC mediante CMS / WCMS5</span>
@@ -540,24 +539,7 @@ export default function App() {
                 onOpenDetail={() => setIsDetailModalOpen(true)}
                 onOpenGeocercas={() => setActiveTab('geocercas')}
                 onOpenTracker={() => setActiveTab('tracker')}
-                onOpenDescargar={() => {
-                  if (selectedVehicle) {
-                    handleDownloadRecording({
-                      id: 'temp',
-                      vehicleId: selectedVehicle.id,
-                      unitNumber: selectedVehicle.unitNumber,
-                      channelNumber: 1,
-                      channelName: 'CH1 - Frontal',
-                      startTime: selectedVehicle.lastUpdate,
-                      endTime: selectedVehicle.lastUpdate,
-                      durationSeconds: 600,
-                      durationFormatted: '10m 00s',
-                      fileSizeMb: 120,
-                      triggerType: 'manual',
-                      storageLocation: 'device'
-                    });
-                  }
-                }}
+                onOpenDescargar={() => setActiveTab('biblioteca')}
                 onOpenAlertas={() => setActiveTab('alertas')}
               />
             </div>

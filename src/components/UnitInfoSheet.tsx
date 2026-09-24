@@ -88,7 +88,7 @@ export const UnitInfoSheet: React.FC<UnitInfoSheetProps> = ({
               </span>
             </div>
             <div className="text-[10px] font-mono text-[#00d1ff]/90 mt-0.5 tracking-tight">
-              {vehicle.lat.toFixed(5)}, {vehicle.lng.toFixed(5)}
+              {vehicle.lat === null || vehicle.lng === null ? 'Sin posición GPS' : `${vehicle.lat.toFixed(5)}, ${vehicle.lng.toFixed(5)}`}
             </div>
           </div>
 
@@ -113,7 +113,7 @@ export const UnitInfoSheet: React.FC<UnitInfoSheetProps> = ({
         <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs border-t border-[#293a50]/50 pt-2.5">
           <div className="flex flex-col">
             <span className="text-slate-400 text-[11px]">Fecha y Hora</span>
-            <span className="text-slate-200 font-mono text-xs">{vehicle.lastUpdate}</span>
+            <span className="text-slate-200 font-mono text-xs">{vehicle.lastUpdate || 'Sin reporte'}</span>
           </div>
 
           <div className="flex flex-col">

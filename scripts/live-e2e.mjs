@@ -84,7 +84,7 @@ try {
   console.log('FOUR LIVE', JSON.stringify(report.firstFour));
   assert((await sample()).every(video => video.muted && video.volume === 0), 'Audio was audible before manual activation');
   const beforeAudioRequests = report.requests.length;
-  await page.getByRole('button', { name:'AUDIO 4', exact:true }).click();
+  await page.getByRole('button', { name:'AUDIO', exact:true }).click();
   const audioMeasurements = await page.evaluate(async () => {
       const videos = [...document.querySelectorAll('#camera-view-overlay video')];
       window.liveAudioTest ||= { context:new AudioContext(), nodes:new Map() };
@@ -125,7 +125,7 @@ try {
   await page.screenshot({ path:path.join(output,`${unit}-4ch.png`) });
   await assertUnit();
   const downloadPromise = page.waitForEvent('download');
-  await page.locator('video[data-channel="1"]').locator('../..').getByTitle('Capturar foto instantánea HD').click();
+  await page.locator('video[data-channel="1"]').locator('../..').getByTitle('Capturar fotograma a resolución original').click();
   const download = await downloadPromise;
   assert(download.suggestedFilename().startsWith(`${unit}-CH1-`));
   await download.saveAs(path.join(output,'snapshot-CH1.png'));

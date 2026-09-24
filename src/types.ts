@@ -45,8 +45,8 @@ export interface Vehicle {
   status: VehicleStatus;
   statusText: string; // e.g. "Moviendo - Loja → Catamayo"
   speed: number;      // km/h
-  lat: number;
-  lng: number;
+  lat: number | null;
+  lng: number | null;
   heading: number;    // degrees (0-360)
   route: string;      // e.g. "Loja → Catamayo"
   geofence: string;   // e.g. "Tt Terrestre Catamayo"
@@ -58,12 +58,12 @@ export interface Vehicle {
   driverName?: string;
   driverPhone?: string;
   ignition: boolean;
-  mileageKm: number;
-  fuelLevelPct: number;
-  engineTempC: number;
-  batteryVolts: number;
-  altitudeMeters: number;
-  satellites: number;
+  mileageKm: number | null;
+  fuelLevelPct: number | null;
+  engineTempC: number | null;
+  batteryVolts: number | null;
+  altitudeMeters: number | null;
+  satellites: number | null;
   simCard?: string;
   ipAddress?: string;
   mdvrId?: string;

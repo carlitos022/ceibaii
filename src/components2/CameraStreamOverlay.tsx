@@ -33,10 +33,11 @@ const ChannelPlayer: React.FC<{
   channel: VideoChannel;
   audioEnabled: boolean;
   refreshKey: number;
+  streamType: '0' | '1';
   onState: (channelNumber: number, state: PlayerState) => void;
-}> = ({ vehicle, channel, audioEnabled, refreshKey, onState }) => {
+}> = ({ vehicle, channel, audioEnabled, refreshKey, streamType, onState }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const stream = useLiveStream(videoRef, vehicle.id, channel.channelNumber, refreshKey, onState);
+  const stream = useLiveStream(videoRef, vehicle.id, channel.channelNumber, refreshKey, streamType, onState);
   useEnhancedAudio(videoRef, channel.channelNumber, audioEnabled);
   const { mode } = stream;
 
@@ -120,7 +121,7 @@ const ChannelPlayer: React.FC<{
          muted
         playsInline
         data-channel={channel.channelNumber}
-        className="w-full h-full object-cover bg-black"
+        className="w-full h-full object-contain bg-black"
         style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${scale})`, transformOrigin: 'center center', transition: dragging ? 'none' : 'transform 120ms ease-out' }}
       />
       {mode !== 'live' && (
@@ -151,13 +152,14 @@ export const CameraStreamOverlay: React.FC<CameraStreamOverlayProps> = ({
   onClose
 }) => {
   // One channel avoids exhausting the mobile MDVR uplink; 4CH remains opt-in.
-  const [selectedChannels, setSelectedChannels] = useState<number[]>([1]);
+  const [selectedChannels, setSelectedChannels] = useState<number[]>(vehicle?.channels[0] ? [vehicle.channels[0].channelNumber] : []);
   const [fullscreenChannel, setFullscreenChannel] = useState<number | null>(null);
   // All AAC tracks stay attached; operators explicitly enable any combination.
   const [enabledAudioChannels, setEnabledAudioChannels] = useState<number[]>([]);
   const [snapshotTaken, setSnapshotTaken] = useState<string | null>(null);
   const [playerState, setPlayerState] = useState<Record<number, PlayerState>>({});
   const [refreshKeys, setRefreshKeys] = useState<Record<number, number>>({});
+  const [streamType, setStreamType] = useState<'0' | '1'>('1');
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -167,14 +169,14 @@ export const CameraStreamOverlay: React.FC<CameraStreamOverlayProps> = ({
         return;
       }
       const channel = Number(event.key);
-      if (channel >= 1 && channel <= 4) {
+      if (vehicle?.channels.some(c => c.channelNumber === channel)) {
         setFullscreenChannel(null);
         setSelectedChannels([channel]);
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [onClose]);
+  }, [onClose, vehicle?.id, vehicle?.channels]);
 
   if (!vehicle) return null;
 
@@ -224,28 +226,17 @@ export const CameraStreamOverlay: React.FC<CameraStreamOverlayProps> = ({
 
   const toggleAllAudio = () => {
     setEnabledAudioChannels(channels => {
-      const enable = channels.length !== 4;
+      const numbers = vehicle?.channels.map(c => c.channelNumber) || [];
+      const enable = channels.length !== numbers.length;
       if (enable) {
-        setSelectedChannels([1, 2, 3, 4]);
+        setSelectedChannels(numbers);
         setFullscreenChannel(null);
       }
-      return enable ? [1, 2, 3, 4] : [];
+      return enable ? numbers : [];
     });
   };
 
-  // Asegurar que siempre tengamos 4 canales representados
-  const availableChannels: VideoChannel[] = [1, 2, 3, 4].map(chNum => {
-    const found = vehicle.channels.find(c => c.channelNumber === chNum);
-    return found || {
-      id: chNum,
-      channelNumber: chNum,
-      name: CHANNEL_LABELS[chNum] || `CH${chNum}`,
-      status: 'live',
-      resolution: chNum <= 2 ? '1080P' : '720P',
-      fps: 25,
-      bitrate: chNum <= 2 ? '2048 Kbps' : '1024 Kbps'
-    };
-  });
+  const availableChannels: VideoChannel[] = vehicle.channels;
 
   const channelsToRender = fullscreenChannel
     ? availableChannels.filter(c => c.channelNumber === fullscreenChannel)
@@ -266,18 +257,18 @@ export const CameraStreamOverlay: React.FC<CameraStreamOverlayProps> = ({
                 Cámaras en Vivo: {vehicle.unitNumber}
               </span>
               <span className="hidden sm:inline-flex px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 text-[9px] font-mono font-bold uppercase tracking-wider">
-                4 CANALES EN VIVO
+                {availableChannels.length} CANALES CONFIGURADOS
               </span>
             </div>
             <span className="text-[10px] sm:text-xs text-slate-400 font-mono block truncate">
-              Streamax X5 MDVR • {vehicle.speed} km/h • {vehicle.route || 'Ruta Principal'}
+              {vehicle.deviceModel || 'MDVR'} • {vehicle.speed} km/h • Grupo: {vehicle.route || 'Sin dato'}
             </span>
           </div>
         </div>
 
         {/* Channel Selector Toggle Buttons */}
         <div className="flex flex-wrap items-center gap-1.5 bg-[#000f20] p-1 rounded-lg border border-[#293a50]">
-          {[1, 2, 3, 4].map(ch => {
+          {availableChannels.map(({channelNumber: ch}) => {
             const isSelected = selectedChannels.includes(ch);
             return (
               <button
@@ -300,24 +291,31 @@ export const CameraStreamOverlay: React.FC<CameraStreamOverlayProps> = ({
 
           <button
             onClick={toggleAllAudio}
-            className={`px-2 py-1 text-[10px] font-mono font-bold rounded border cursor-pointer transition-all ${enabledAudioChannels.length === 4 ? 'bg-emerald-400 text-black border-emerald-300' : 'bg-slate-800 text-slate-300 border-[#293a50]'}`}
-            title={enabledAudioChannels.length === 4 ? 'Silenciar los cuatro canales' : 'Activar audio de las cuatro cámaras'}
+            className={`px-2 py-1 text-[10px] font-mono font-bold rounded border cursor-pointer transition-all ${enabledAudioChannels.length === availableChannels.length && availableChannels.length > 0 ? 'bg-emerald-400 text-black border-emerald-300' : 'bg-slate-800 text-slate-300 border-[#293a50]'}`}
+            title={enabledAudioChannels.length === availableChannels.length ? 'Silenciar todos los canales' : 'Activar audio de todos los canales'}
           >
-            {enabledAudioChannels.length === 4 ? 'SILENCIAR 4' : 'AUDIO 4'}
+            {enabledAudioChannels.length === availableChannels.length ? 'SILENCIAR' : 'AUDIO'}
           </button>
           <button
             onClick={() => {
               setFullscreenChannel(null);
-              setSelectedChannels([1, 2, 3, 4]);
+              setSelectedChannels(availableChannels.map(c => c.channelNumber));
             }}
             className={`px-2 py-1 text-[10px] font-mono font-bold rounded border cursor-pointer transition-all ${
-              selectedChannels.length === 4 && !fullscreenChannel
+              selectedChannels.length === availableChannels.length && !fullscreenChannel
                 ? 'bg-[#00d1ff] text-black border-[#00d1ff] shadow-[0_0_8px_rgba(0,209,255,0.4)]'
                 : 'bg-slate-800 text-slate-300 hover:text-white border-[#293a50]'
             }`}
-            title="Ver cuadrícula completa de 4 canales"
+            title="Ver todos los canales configurados"
           >
-            4CH
+            {availableChannels.length}CH
+          </button>
+          <button
+            onClick={() => setStreamType(type => type === '1' ? '0' : '1')}
+            className="px-2 py-1 text-[10px] font-mono font-bold rounded border border-[#293a50] bg-slate-800 text-slate-200 hover:text-white"
+            title="Cambiar flujo del MDVR; la resolución depende de la configuración y señal del equipo"
+          >
+            FLUJO {streamType}
           </button>
         </div>
 
@@ -357,6 +355,7 @@ export const CameraStreamOverlay: React.FC<CameraStreamOverlayProps> = ({
                 channel={channel}
                 audioEnabled={enabledAudioChannels.includes(channel.channelNumber)}
                 refreshKey={refreshKeys[channel.channelNumber] || 0}
+                streamType={streamType}
                 onState={onPlayerState}
               />
 
@@ -375,7 +374,7 @@ export const CameraStreamOverlay: React.FC<CameraStreamOverlayProps> = ({
 
               {/* Timestamp & Vehicle Speed Watermark in Top Right */}
               <div className="absolute top-2 right-2 bg-black/85 backdrop-blur-md px-2 py-0.5 rounded-md text-[10px] font-mono text-slate-200 border border-white/10 z-10 text-right pointer-events-none shadow-md">
-                <div className="text-[9px] text-slate-300">{vehicle.lastUpdate}</div>
+                <div className="text-[9px] text-slate-300">GPS: {vehicle.lastUpdate || 'sin reporte'}</div>
                 <div className="text-[9px] text-[#00d1ff] font-bold">
                   {vehicle.speed} KM/H • {vehicle.unitNumber}
                 </div>

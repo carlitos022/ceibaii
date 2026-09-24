@@ -47,8 +47,9 @@ export const MapView: React.FC<MapViewProps> = ({
   useEffect(() => {
     if (!mapContainerRef.current || mapInstanceRef.current) return;
 
-    const centerLat = selectedVehicle?.lat ?? vehicles[0]?.lat ?? -3.9928;
-    const centerLng = selectedVehicle?.lng ?? vehicles[0]?.lng ?? -79.2845;
+    const firstLocated = vehicles.find(v => v.lat !== null && v.lng !== null);
+    const centerLat = selectedVehicle?.lat ?? firstLocated?.lat ?? -3.9928;
+    const centerLng = selectedVehicle?.lng ?? firstLocated?.lng ?? -79.2845;
 
     const map = L.map(mapContainerRef.current, {
       center: [centerLat, centerLng],
@@ -121,7 +122,7 @@ export const MapView: React.FC<MapViewProps> = ({
           dashArray: '6, 4'
         });
         circle.bindTooltip(
-          `<div class="text-[10px] font-mono font-bold text-slate-200">${geo.name} • ${geo.radiusMeters}m</div>`,
+          `<div class="text-[10px] font-mono font-bold text-slate-200">${escapeHtml(geo.name)} • ${geo.radiusMeters}m</div>`,
           { permanent: false, direction: 'center', className: 'bg-transparent border-0 shadow-none' }
         );
         const dot = L.circleMarker(geo.center as [number, number], {
@@ -131,7 +132,7 @@ export const MapView: React.FC<MapViewProps> = ({
           fillOpacity: 1,
           weight: 2
         });
-        dot.bindTooltip(`<div class="text-[10px] font-mono font-bold text-white">${geo.name}</div>`, { permanent: false, direction: 'top' });
+        dot.bindTooltip(`<div class="text-[10px] font-mono font-bold text-white">${escapeHtml(geo.name)}</div>`, { permanent: false, direction: 'top' });
         dot.addTo(geofenceLayersRef.current!);
         layer = circle;
       } else {
@@ -143,7 +144,7 @@ export const MapView: React.FC<MapViewProps> = ({
           dashArray: '4, 6'
         });
         polygon.bindTooltip(
-          `<div class="text-[10px] font-mono font-bold text-slate-200">${geo.name}</div>`,
+          `<div class="text-[10px] font-mono font-bold text-slate-200">${escapeHtml(geo.name)}</div>`,
           { permanent: false, direction: 'center', className: 'bg-transparent border-0 shadow-none' }
         );
         layer = polygon;
@@ -152,11 +153,23 @@ export const MapView: React.FC<MapViewProps> = ({
     });
   }, [geofences]);
 
+  const escapeHtml = (value: string) => String(value).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] || c));
+
   // Render / Update Vehicle Markers
   useEffect(() => {
     if (!mapInstanceRef.current) return;
 
+    const visibleIds = new Set(vehicles.filter(v => v.lat !== null && v.lng !== null).map(v => v.id));
+    for (const id of Object.keys(markersRef.current)) {
+      if (!visibleIds.has(id)) {
+        markersRef.current[id].remove();
+        delete markersRef.current[id];
+        if (markerAnimationsRef.current[id]) cancelAnimationFrame(markerAnimationsRef.current[id]);
+        delete markerAnimationsRef.current[id];
+      }
+    }
     vehicles.forEach((vehicle) => {
+      if (vehicle.lat === null || vehicle.lng === null) return;
       const isSelected = selectedVehicle?.id === vehicle.id;
       
       let badgeColor = '#6b7280';
@@ -180,7 +193,7 @@ export const MapView: React.FC<MapViewProps> = ({
       } else {
         badgeColor = '#6b7280';
         badgeBg = '#757575';
-        statusSubtitle = 'Apagado';
+        statusSubtitle = 'Sin conexión';
       }
 
       const iconHtml = `
@@ -204,8 +217,8 @@ export const MapView: React.FC<MapViewProps> = ({
           <div class="mt-1 bg-[#000f20]/95 backdrop-blur-md px-1.5 py-0.5 rounded border shadow-lg flex flex-col items-center text-center font-mono ${
             isSelected ? 'border-[#00d1ff] ring-1 ring-[#00d1ff]' : 'border-[#293a50]'
           }">
-            <span class="font-bold text-[9px] text-white leading-tight">${vehicle.unitNumber}</span>
-            <span class="text-[8px] leading-none" style="color: ${badgeColor}">${statusSubtitle}</span>
+            <span class="font-bold text-[9px] text-white leading-tight">${escapeHtml(vehicle.unitNumber)}</span>
+            <span class="text-[8px] leading-none" style="color: ${badgeColor}">${escapeHtml(statusSubtitle)}</span>
           </div>
         </div>
       `;
@@ -255,11 +268,7 @@ export const MapView: React.FC<MapViewProps> = ({
         marker.on('click', (e) => {
           L.DomEvent.stopPropagation(e);
           const latestVehicle = vehiclesRef.current.find((item) => item.id === vehicle.id) || vehicle;
-          if (selectedVehicle?.id === vehicle.id) {
-            onMapClick();
-          } else {
-            onSelectVehicle(latestVehicle);
-          }
+          onSelectVehicle(latestVehicle);
         });
 
         marker.addTo(mapInstanceRef.current!);
@@ -278,17 +287,20 @@ export const MapView: React.FC<MapViewProps> = ({
           opacity: 0.8
         }).addTo(mapInstanceRef.current);
       }
+    } else if (trailLayerRef.current) {
+      trailLayerRef.current.remove();
+      trailLayerRef.current = null;
     }
   }, [vehicles, selectedVehicle]);
 
   useEffect(() => {
-    if (!mapInstanceRef.current || !selectedVehicle) return;
+    if (!mapInstanceRef.current || selectedVehicle?.lat == null || selectedVehicle?.lng == null) return;
 
     mapInstanceRef.current.panTo([selectedVehicle.lat, selectedVehicle.lng], {
       animate: true,
       duration: 0.8
     });
-  }, [selectedVehicle?.id, selectedVehicle?.lat, selectedVehicle?.lng]);
+  }, [selectedVehicle?.id]);
 
   const toggleFullscreen = () => {
     if (!document.fullscreenElement) {
@@ -304,8 +316,8 @@ export const MapView: React.FC<MapViewProps> = ({
   const fitToFleet = () => {
     if (!mapInstanceRef.current) return;
     const latLngs = vehicles
-      .filter((v) => !Number.isNaN(v.lat) && !Number.isNaN(v.lng))
-      .map((v) => [v.lat, v.lng] as L.LatLngExpression);
+      .filter((v) => v.lat !== null && v.lng !== null)
+      .map((v) => [v.lat!, v.lng!] as L.LatLngExpression);
     if (latLngs.length === 0) return;
     try {
       mapInstanceRef.current.fitBounds(latLngs, {
@@ -324,7 +336,7 @@ export const MapView: React.FC<MapViewProps> = ({
       {selectedVehicle && (
         <div className="absolute top-16 left-4 z-20 pointer-events-none animate-in fade-in">
           <div className="bg-[#000f20]/90 backdrop-blur-md border border-[#ff9100]/50 px-2.5 py-1 rounded shadow-lg flex items-center space-x-2">
-            <span className="w-2 h-2 rounded-full bg-[#ff9100] animate-ping" />
+            <span className={`w-2 h-2 rounded-full ${selectedVehicle.status === 'moving' ? 'bg-[#ff9100] animate-ping' : selectedVehicle.status === 'offline' ? 'bg-slate-500' : 'bg-[#ef4444]'}`} />
             <span className="font-mono text-xs font-bold text-[#ff9100]">
               {selectedVehicle.speed} km/h
             </span>

@@ -16,7 +16,7 @@ const CFG = {
   dbHost: process.env.MYSQL_HOST || '127.0.0.1',
   dbPort: parseInt(process.env.MYSQL_PORT || '3307'),
   dbUser: process.env.MYSQL_USER || 'root',
-  dbPassword: process.env.MYSQL_PASSWORD || 'c6l7r8ceacvi2010vs',
+  dbPassword: process.env.MYSQL_PASSWORD,
   dbName: process.env.MYSQL_DATABASE || 'wcms4',
   redisCli: 'C:\\Program Files (x86)\\CMS Server\\TransmitServer\\redis_service\\redis-cli.exe',
   redisPort: 12004,
@@ -104,7 +104,7 @@ async function empujeHLS(deviceId, channel=1) {
 async function empujeDescarga(deviceId, carlicense, dateStr, startTime, endTime, channels=[1,2,3,4]) {
   // Usar token wcms4
   const CryptoJS = (await import('crypto-js')).default;
-  const DES_KEY='rogernet', DES_IV='rogernet';
+  const DES_KEY=process.env.DES_KEY, DES_IV=process.env.DES_IV;
   function desEncrypt(str){
     const key=CryptoJS.enc.Utf8.parse(DES_KEY);
     const iv=CryptoJS.enc.Utf8.parse(DES_IV);

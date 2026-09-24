@@ -13,7 +13,7 @@ export interface LiveState {
 
 // A session belongs to a device/channel, never to a GPS snapshot or mute button.
 export function useLiveStream(videoRef: RefObject<HTMLVideoElement | null>, vehicleId: string,
-  channel: number, refreshKey: number, onState: (channel: number, state: LiveState) => void) {
+  channel: number, refreshKey: number, streamType: '0' | '1', onState: (channel: number, state: LiveState) => void) {
   const [state, setState] = useState<LiveState>({ mode: 'loading' });
   const callback = useRef(onState);
   callback.current = onState;
@@ -53,7 +53,7 @@ export function useLiveStream(videoRef: RefObject<HTMLVideoElement | null>, vehi
     const retry = (reason: string) => {
       if (disposed) return;
       release();
-      const delay = Math.min(15000, 1500 * 2 ** Math.min(failures++, 4));
+      const delay = Math.min(12000, 750 * 2 ** Math.min(failures++, 4));
       publish({ mode: 'retrying', error: reason });
       timer = setTimeout(start, delay + channel * 150);
     };
@@ -64,7 +64,7 @@ export function useLiveStream(videoRef: RefObject<HTMLVideoElement | null>, vehi
       const active = () => !disposed && id === generation;
       publish({ mode: 'loading', attempt: ++attempt, error: undefined, hasAudio: undefined, width: undefined, height: undefined });
       controller = new AbortController();
-      timer = setTimeout(() => { if (active()) retry('El CMS no entregó la primera imagen a tiempo'); }, 45000);
+      timer = setTimeout(() => { if (active()) retry('El CMS no entregó la primera imagen a tiempo'); }, 35000);
       try {
         // Keep each AAC track attached: switching sound must not restart two cameras.
         let token: string | undefined;
@@ -75,7 +75,7 @@ export function useLiveStream(videoRef: RefObject<HTMLVideoElement | null>, vehi
           return;
         }
         const headers = { Authorization: `Bearer ${token}` };
-        const response = await fetch(`/api/vehicles/${encodeURIComponent(vehicleId)}/video-stream/${channel}?audio=1`, { signal: controller.signal, headers });
+        const response = await fetch(`/api/vehicles/${encodeURIComponent(vehicleId)}/video-stream/${channel}?audio=1&stream=${streamType}`, { signal: controller.signal, headers });
         const data = await response.json();
         if (!active()) return;
         if (response.status === 401 || response.status === 403) {
@@ -92,8 +92,7 @@ export function useLiveStream(videoRef: RefObject<HTMLVideoElement | null>, vehi
         // The descriptor returns a short-lived token scoped to this vehicle/channel.
         // This is reliable across all flv.js loaders, including worker/fetch variants.
         const instance = flvjs.createPlayer({ type: 'flv', isLive: true, url: data.flvUrl }, {
-          enableStashBuffer: true,
-          stashInitialSize: 32 * 1024,
+          enableStashBuffer: false,
           lazyLoad: false,
           enableWorker: false,
           fixAudioTimestampGap: true,
@@ -154,13 +153,13 @@ export function useLiveStream(videoRef: RefObject<HTMLVideoElement | null>, vehi
             if (end - video.currentTime > 12) video.currentTime = Math.max(video.buffered.start(video.buffered.length - 1), end - 3);
           }
           if (started && video.paused) void play();
-        }, 2000);
+        }, 1000);
       } catch (e: any) {
         if (active()) retry(e.message || 'No se pudo conectar al CMS');
       }
     };
-    timer = setTimeout(start, (channel - 1) * 750);
+    timer = setTimeout(start, 0);
     return () => { disposed = true; release(); };
-  }, [vehicleId, channel, refreshKey, videoRef]);
+  }, [vehicleId, channel, refreshKey, streamType, videoRef]);
   return state;
 }

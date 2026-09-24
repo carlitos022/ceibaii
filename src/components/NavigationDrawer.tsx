@@ -142,7 +142,7 @@ export const NavigationDrawer: React.FC<NavigationDrawerProps> = ({
                 }`}
               >
                 <div className="w-2 h-2 rounded-full bg-[#6b7280] shadow-[0_0_5px_rgba(107,114,128,0.5)]" />
-                <span className="truncate">Apagado</span>
+                <span className="truncate">Sin conexión</span>
                 <span className="ml-auto text-[#6b7280] font-mono">{counts.offline}</span>
               </button>
 

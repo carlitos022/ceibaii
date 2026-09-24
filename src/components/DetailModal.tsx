@@ -29,7 +29,7 @@ export const DetailModal: React.FC<DetailModalProps> = ({
                 Detalle Telemático: {vehicle.unitNumber}
               </h2>
               <span className="text-[10px] text-slate-400 font-mono">
-                Placa: {vehicle.plate} • MDVR: {vehicle.mdvrId || 'Streamax X5'}
+                Placa: {vehicle.plate} • MDVR: {vehicle.mdvrId || 'Sin dato'}
               </span>
             </div>
           </div>
@@ -48,8 +48,8 @@ export const DetailModal: React.FC<DetailModalProps> = ({
           <div className="p-3 rounded-xl bg-[#011428] border border-[#293a50] flex items-center justify-between">
             <div className="flex items-center space-x-3">
               <div className="relative">
-                <Activity className="w-5 h-5 text-emerald-400" />
-                <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-emerald-500 rounded-full animate-ping" />
+                <Activity className={`w-5 h-5 ${vehicle.status === 'offline' ? 'text-slate-500' : 'text-emerald-400'}`} />
+                {vehicle.status !== 'offline' && <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-emerald-500 rounded-full animate-ping" />}
               </div>
               <div>
                 <div className="text-white font-bold font-mono text-sm">{vehicle.statusText}</div>
@@ -72,7 +72,7 @@ export const DetailModal: React.FC<DetailModalProps> = ({
               <div className="bg-slate-900/80 p-2.5 rounded-lg border border-[#293a50]/60">
                 <span className="text-slate-400 text-[10px] block">Odómetro Total</span>
                 <span className="text-white font-mono font-semibold text-xs">
-                  {vehicle.mileageKm.toLocaleString()} km
+                  {vehicle.mileageKm == null ? 'Sin dato' : `${vehicle.mileageKm.toLocaleString()} km`}
                 </span>
               </div>
 
@@ -82,7 +82,7 @@ export const DetailModal: React.FC<DetailModalProps> = ({
                   <span>Combustible</span>
                 </span>
                 <span className="text-white font-mono font-semibold text-xs">
-                  {vehicle.fuelLevelPct}%
+                  {vehicle.fuelLevelPct == null ? 'Sin dato' : `${vehicle.fuelLevelPct}%`}
                 </span>
               </div>
 
@@ -92,21 +92,21 @@ export const DetailModal: React.FC<DetailModalProps> = ({
                   <span>Batería</span>
                 </span>
                 <span className="text-white font-mono font-semibold text-xs">
-                  {vehicle.batteryVolts} V
+                  {vehicle.batteryVolts == null ? 'Sin dato' : `${vehicle.batteryVolts} V`}
                 </span>
               </div>
 
               <div className="bg-slate-900/80 p-2.5 rounded-lg border border-[#293a50]/60">
                 <span className="text-slate-400 text-[10px] block">Temp. Motor</span>
                 <span className="text-white font-mono font-semibold text-xs">
-                  {vehicle.engineTempC} °C
+                  {vehicle.engineTempC == null ? 'Sin dato' : `${vehicle.engineTempC} °C`}
                 </span>
               </div>
 
               <div className="bg-slate-900/80 p-2.5 rounded-lg border border-[#293a50]/60">
                 <span className="text-slate-400 text-[10px] block">Altitud GPS</span>
                 <span className="text-white font-mono font-semibold text-xs">
-                  {vehicle.altitudeMeters} msnm
+                  {vehicle.altitudeMeters == null ? 'Sin dato' : `${vehicle.altitudeMeters} msnm`}
                 </span>
               </div>
 
@@ -116,7 +116,7 @@ export const DetailModal: React.FC<DetailModalProps> = ({
                   <span>Satélites</span>
                 </span>
                 <span className="text-white font-mono font-semibold text-xs">
-                  {vehicle.satellites} Fijados
+                  {vehicle.satellites == null ? 'Sin dato' : `${vehicle.satellites} fijados`}
                 </span>
               </div>
             </div>
@@ -138,12 +138,12 @@ export const DetailModal: React.FC<DetailModalProps> = ({
                   <Phone className="w-3 h-3 text-slate-400" />
                   <span>Teléfono Contacto:</span>
                 </span>
-                <span className="text-[#00d1ff] font-mono">{vehicle.driverPhone || '+593 98 765 4321'}</span>
+                <span className="text-[#00d1ff] font-mono">{vehicle.driverPhone || 'Sin dato'}</span>
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-slate-400 flex items-center space-x-1">
                   <MapPin className="w-3 h-3 text-slate-400" />
-                  <span>Ruta Autorizada:</span>
+                  <span>Grupo:</span>
                 </span>
                 <span className="text-white font-mono">{vehicle.route}</span>
               </div>
@@ -159,15 +159,15 @@ export const DetailModal: React.FC<DetailModalProps> = ({
             <div className="bg-slate-900/80 p-3 rounded-lg border border-[#293a50]/60 space-y-1.5 font-mono text-[11px]">
               <div className="flex justify-between">
                 <span className="text-slate-400">Modelo Hardware:</span>
-                <span className="text-slate-200">{vehicle.deviceModel || 'Streamax X5-H0804'}</span>
+                <span className="text-slate-200">{vehicle.deviceModel || 'Sin dato'}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-slate-400">Dirección IP MDVR:</span>
-                <span className="text-slate-200">{vehicle.ipAddress || '192.168.1.103'}</span>
+                <span className="text-slate-200">{vehicle.ipAddress || 'Sin dato'}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-slate-400">SIM 4G IMSI:</span>
-                <span className="text-slate-200">{vehicle.simCard || '8959300284729104'}</span>
+                <span className="text-slate-200">{vehicle.simCard || 'Sin dato'}</span>
               </div>
             </div>
           </div>
