@@ -1,11 +1,12 @@
+import 'dotenv/config';
 import { Vehicle, AlertItem, Geofence, LibraryRecord, DownloadJob } from '../src/types';
 import { executeQuery, ensureTrackerEventsTable, isDbConnected } from './db';
 import fs from 'fs';
 import path from 'path';
 
-const LAST_GPS_PATH = 'C:/Program Files (x86)/CMS Server/TransmitServer/AlarmServer/LastGps.txt';
+const LAST_GPS_PATH = process.env.CEIBA_LAST_GPS_PATH || 'C:/Program Files (x86)/CMS Server/TransmitServer/AlarmServer/LastGps.txt';
 const ONLINE_THRESHOLD_SEC = Number(process.env.GPS_FRESHNESS_SECONDS || 600);
-const ARMS_API_URL = 'http://127.0.0.1:12040'; // Ceiba II ARMS API para estado de dispositivos
+const ARMS_API_URL = process.env.CEIBA_ARMS_URL || 'http://127.0.0.1:12040';
 
 // Telemetría real desde la base de datos y el último reporte GPS
 let vehiclesState: Vehicle[] = [];
