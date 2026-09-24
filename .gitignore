@@ -1,0 +1,37 @@
+# Local environment and credentials
+.env*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+# Generated data and runtime output
+node_modules/
+dist/
+build/
+coverage/
+assets/
+*.log
+*.map
+*.mp4
+*.flv
+*.apk
+*.zip
+*.db
+*.sqlite*
+# Backups and alternate experiments
+*.bak
+*.backup
+*.tmp
+server.ts.bak_pre_final
+server_live.ts
+index2.html
+vite.config2.ts
+src/App2.tsx
+src/main2.tsx
+CEIBA_II_INTEGRATION.md
+LIVE-REPAIR-2026-09-14.md
+x.children.length
+{localStorage.setItem('csrs_auth'

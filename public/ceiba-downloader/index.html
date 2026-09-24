@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>Ceiba Video Downloader</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="icon-192.png">
+  <meta name="apple-mobile-web-app-title" content="Ceiba DVR">
+  <meta name="theme-color" content="#0f172a">
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+  <div id="app">
+    <!-- Splash Screen -->
+    <div id="splash" class="splash">
+      <div class="splash-logo">
+        <svg viewBox="0 0 24 24" width="72" height="72"><path fill="#38bdf8" d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z"/></svg>
+      </div>
+      <div class="splash-title">Ceiba Video Downloader</div>
+      <div class="splash-sub">Descarga de video móvil para MDVR</div>
+      <div class="splash-loader"><div class="splash-dot"></div><div class="splash-dot"></div><div class="splash-dot"></div></div>
+    </div>
+
+    <!-- Login View -->
+    <div id="view-login" class="view" style="display:none">
+      <div class="login-bg">
+        <div class="login-orb login-orb-1"></div>
+        <div class="login-orb login-orb-2"></div>
+      </div>
+      <div class="login-card">
+        <div class="login-logo">
+          <svg viewBox="0 0 24 24" width="56" height="56"><path fill="#38bdf8" d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z"/></svg>
+        </div>
+        <h1 class="login-title">Ceiba Video Downloader</h1>
+        <p class="login-desc">Descarga remota de videos desde celulares</p>
+        <form id="form-login" onsubmit="return false">
+          <div class="field">
+            <label for="login-user">Usuario</label>
+            <input id="login-user" type="text" placeholder="Ingrese su usuario" autocomplete="username" required>
+          </div>
+          <div class="field">
+            <label for="login-pass">Contraseña</label>
+            <input id="login-pass" type="password" placeholder="Ingrese su contraseña" autocomplete="current-password" required>
+          </div>
+          <div id="login-error" class="login-error" style="display:none"></div>
+          <button id="btn-login" type="submit" class="btn btn-primary btn-block">Iniciar Sesión</button>
+        </form>
+      </div>
+    </div>
+
+    <!-- Main App View -->
+    <div id="view-main" class="view" style="display:none">
+      <header class="topbar">
+        <div class="topbar-brand">
+          <svg viewBox="0 0 24 24" width="22" height="22"><path fill="currentColor" d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z"/></svg>
+          <span>Ceiba Downloader</span>
+        </div>
+        <div class="topbar-actions">
+          <span id="topbar-status" class="topbar-status"></span>
+          <button id="btn-logout" class="btn btn-ghost btn-icon" aria-label="Cerrar sesión" title="Cerrar sesión">
+            <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.58L17 17l5-5zM4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4V5z"/></svg>
+          </button>
+        </div>
+      </header>
+
+      <!-- Dashboard: Vehicles List -->
+      <div id="page-dashboard" class="page" style="display:none">
+        <div class="page-header">
+          <div class="page-header-row">
+            <h2>Vehículos</h2>
+            <button id="btn-refresh-status" class="btn btn-sm btn-primary" onclick="refreshStatus()" title="Actualizar estado">
+              <svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
+            </button>
+          </div>
+          <div class="search-box">
+            <input id="input-search" type="text" placeholder="Buscar vehículo por placa o ID..." oninput="filterVehicles(this.value)">
+          </div>
+          <div id="status-summary" class="status-summary"></div>
+        </div>
+        <div id="vehicle-list" class="vehicle-list"></div>
+        <div id="vehicle-empty" class="empty-state" style="display:none">
+          <svg viewBox="0 0 24 24" width="48" height="48"><path fill="currentColor" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
+          <p>No se encontraron vehículos</p>
+        </div>
+      </div>
+
+      <!-- Vehicle Detail: Calendar, Channels & Timeline -->
+      <div id="page-vehicle" class="page" style="display:none">
+        <div class="page-header">
+          <button class="btn btn-back" onclick="showDashboard()">
+            <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
+            Volver a lista
+          </button>
+          <div class="vehicle-header">
+            <h2 id="vehicle-title">Vehículo</h2>
+            <span id="vehicle-status-badge" class="status-badge">Verificando...</span>
+          </div>
+        </div>
+
+        <div class="vehicle-detail">
+          <!-- Calendar Section -->
+          <div class="detail-section calendar-col">
+            <div class="section-title">1. Seleccionar Fecha</div>
+            <div class="month-nav">
+              <button class="btn btn-sm" onclick="changeMonth(-1)" title="Mes anterior">
+                <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg>
+              </button>
+              <span id="current-month" class="month-label"></span>
+              <button class="btn btn-sm" onclick="changeMonth(1)" title="Mes siguiente">
+                <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>
+              </button>
+            </div>
+            <div id="cal-offline-warn" class="offline-warn" style="display:none">
+              <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>
+              <span>Consultando grabaciones del DVR...</span>
+            </div>
+            <div id="calendar-grid" class="calendar-grid"></div>
+            <div class="calendar-legend">
+              <span><i class="legend-low"></i> Día con video</span>
+              <span><i class="legend-medium"></i> Varias grabaciones</span>
+              <span><i class="legend-high"></i> Alta disponibilidad</span>
+            </div>
+          </div>
+
+          <!-- Channels Section -->
+          <div class="detail-section channels-col">
+            <div class="section-title-row">
+              <span class="section-title">2. Seleccionar Cámaras</span>
+              <button class="btn-text" onclick="toggleAllChannels()">Seleccionar Todas</button>
+            </div>
+            <div id="channel-list" class="channel-chips"></div>
+          </div>
+
+          <!-- Timeline & Time Range Section -->
+          <div class="detail-section timeline-col" id="section-timeline">
+            <div class="section-title">3. Barra de Tiempo y Recorte</div>
+            <div id="channel-legend" class="channel-legend"></div>
+            
+            <div class="timeline-container">
+              <div id="timeline" class="timeline"></div>
+            </div>
+
+            <div class="timeline-tools">
+              <button type="button" class="btn-preset" onclick="nudgeRange('start', -5)">-5m inicio</button>
+              <button type="button" class="btn-preset" onclick="nudgeRange('start', 5)">+5m inicio</button>
+              <button type="button" class="btn-preset" onclick="nudgeRange('end', -5)">-5m fin</button>
+              <button type="button" class="btn-preset" onclick="nudgeRange('end', 5)">+5m fin</button>
+              <button type="button" class="btn-preset btn-preset-primary" onclick="expandRange(5)">Expandir 5m</button>
+              <button type="button" class="btn-preset" onclick="expandRange(15)">Expandir 15m</button>
+              <button type="button" class="btn-preset" onclick="resetRange()">Reset rango</button>
+            </div>
+
+            <div id="tl-retry" style="display:none;text-align:center;margin-top:12px">
+              <button class="btn btn-sm btn-primary" onclick="retryLoadVideoFiles()">
+                <svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
+                Reintentar cargar barra
+              </button>
+            </div>
+
+            <!-- Quick presets -->
+            <div class="quick-presets">
+              <span class="preset-label">Recorte rápido:</span>
+              <button type="button" class="btn-preset btn-preset-primary" onclick="setQuickRange(5)">5m</button>
+              <button type="button" class="btn-preset" onclick="setQuickRange(15)">15m</button>
+              <button type="button" class="btn-preset" onclick="setQuickRange(30)">30m</button>
+              <button type="button" class="btn-preset" onclick="setQuickRange(60)">1h</button>
+              <button type="button" class="btn-preset" onclick="setQuickRange(120)">2h</button>
+              <button type="button" class="btn-preset" onclick="setAllDayRange()">Todo el día</button>
+            </div>
+
+            <div class="time-selector">
+              <div class="field">
+                <label for="time-start">Hora Inicio</label>
+                <input id="time-start" type="time" step="1" value="08:00:00">
+              </div>
+              <div class="field">
+                <label for="time-end">Hora Fin</label>
+                <input id="time-end" type="time" step="1" value="08:30:00">
+              </div>
+              <div class="field">
+                <label for="stream-type">Calidad</label>
+                <select id="stream-type" onchange="onStreamTypeChange()">
+                  <option value="1" selected>Flujo Principal (Alta)</option>
+                  <option value="0">Flujo Secundario (Baja)</option>
+                </select>
+              </div>
+            </div>
+
+            <button id="btn-download" class="btn btn-primary btn-block btn-download-action" onclick="startDownload()">
+              <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
+              Descargar Selección Remota
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Quick Download Page -->
+      <div id="page-quick-download" class="page" style="display:none">
+        <div class="page-header">
+          <button class="btn btn-back" onclick="showDashboard()">
+            <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
+            Volver
+          </button>
+          <div>
+            <h2>Descarga Rápida</h2>
+            <p id="qd-subtitle" style="color:var(--text-secondary);font-size:13px;margin-top:2px"></p>
+          </div>
+        </div>
+        <div class="vehicle-detail">
+          <form id="form-quick-download" onsubmit="return false" class="quick-form">
+            <div class="field">
+              <label for="qd-vehicle">Vehículo</label>
+              <select id="qd-vehicle" required></select>
+            </div>
+            <div class="field">
+              <label for="qd-date">Fecha</label>
+              <input id="qd-date" type="date" required>
+            </div>
+            <div class="time-selector">
+              <div class="field">
+                <label for="qd-start">Hora Inicio</label>
+                <input id="qd-start" type="time" step="1" required value="08:00:00">
+              </div>
+              <div class="field">
+                <label for="qd-end">Hora Fin</label>
+                <input id="qd-end" type="time" step="1" required value="08:30:00">
+              </div>
+            </div>
+            <div class="field">
+              <label for="qd-stream">Flujo</label>
+              <select id="qd-stream">
+                <option value="1" selected>Flujo Principal (Alta)</option>
+                <option value="0">Flujo Secundario (Baja)</option>
+              </select>
+            </div>
+            <div class="field">
+              <label>Cámaras a Descargar</label>
+              <div id="qd-channels" class="channel-chips"></div>
+            </div>
+            <button type="submit" class="btn btn-primary btn-block">
+              <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
+              Iniciar Descarga Remota
+            </button>
+          </form>
+        </div>
+      </div>
+
+      <!-- Downloads Tab -->
+      <div id="page-downloads" class="page" style="display:none">
+        <div class="page-header">
+          <div class="page-header-row">
+            <h2>Centro de Descargas</h2>
+            <button id="btn-refresh-tasks" class="btn btn-sm btn-primary" onclick="loadDownloads()" title="Actualizar">
+              <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
+            </button>
+            <button id="btn-clear-queue" class="btn btn-sm btn-danger" onclick="clearQueue()" title="Limpiar cola">Limpiar cola</button>
+          </div>
+          <p class="downloads-tip">💡 Al tocar <strong>"Descargar al celular"</strong>, el video MP4 se guardará directamente en tu carpeta de <strong>Descargas</strong> de tu celular.</p>
+        </div>
+        <div id="downloads-list" class="downloads-list"></div>
+        <div id="downloads-empty" class="empty-state" style="display:none">
+          <svg viewBox="0 0 24 24" width="48" height="48"><path fill="currentColor" d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
+          <p>No hay descargas activas</p>
+        </div>
+      </div>
+
+      <!-- Bottom Nav Bar -->
+      <nav class="navbar">
+        <button class="nav-btn active" data-page="dashboard" onclick="showPage('dashboard')">
+          <svg viewBox="0 0 24 24" width="22" height="22"><path fill="currentColor" d="M18.92 6.01C18.72 5.42 18.16 5 17.5 5h-11c-.66 0-1.21.42-1.42 1.01L3 12v8c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-1h12v1c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-8l-2.08-5.99zM6.5 16c-.83 0-1.5-.67-1.5-1.5S5.67 13 6.5 13s1.5.67 1.5 1.5S7.33 16 6.5 16zm11 0c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zM5 11l1.5-4.5h11L19 11H5z"/></svg>
+          <span>Vehículos</span>
+        </button>
+        <button class="nav-btn" data-page="downloads" onclick="showPage('downloads')">
+          <svg viewBox="0 0 24 24" width="22" height="22"><path fill="currentColor" d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
+          <span>Descargas</span>
+          <span id="nav-dwn-badge" class="nav-badge" style="display:none">0</span>
+        </button>
+      </nav>
+    </div>
+
+    <!-- Video Player Modal -->
+    <div id="modal-player" class="modal" style="display:none">
+      <div class="modal-backdrop" onclick="closeVideoPlayer()"></div>
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3 id="modal-video-title">Reproduciendo video</h3>
+          <button class="btn btn-ghost btn-icon" onclick="closeVideoPlayer()" aria-label="Cerrar">
+            <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+          </button>
+        </div>
+         <div class="modal-body">
+           <div class="player-toolbar" aria-label="Controles de zoom">
+             <span>Zoom</span>
+             <button type="button" class="btn btn-sm btn-ghost" onclick="changePlayerZoom(-0.25)" aria-label="Alejar">-</button>
+             <strong id="player-zoom-label">100%</strong>
+             <button type="button" class="btn btn-sm btn-ghost" onclick="changePlayerZoom(0.25)" aria-label="Acercar">+</button>
+             <button type="button" class="btn btn-sm btn-ghost" onclick="resetPlayerZoom()">Restablecer</button>
+             <button type="button" class="btn btn-sm btn-ghost" onclick="togglePlayerFullscreen()">Pantalla completa</button>
+           </div>
+           <div class="video-container">
+            <video id="video-player" controls playsinline preload="metadata" autoplay></video>
+          </div>
+          <div class="modal-actions">
+            <button id="modal-btn-download" class="btn btn-primary btn-block" onclick="downloadCurrentModalVideo()">
+              <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
+              Descargar al Celular
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Toast Notification -->
+    <div id="toast" class="toast"></div>
+  </div>
+
+  <script src="js/app.js"></script>
+</body>
+</html>
