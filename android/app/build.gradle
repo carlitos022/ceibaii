@@ -1,0 +1,41 @@
+plugins { id 'com.android.application' }
+def appUrl = providers.gradleProperty('CEIBA_WEB_URL').get()
+def signingPath = System.getenv('CEIBA_SIGNING_STORE_FILE')
+def signingPassword = System.getenv('CEIBA_SIGNING_STORE_PASSWORD')
+def signingAlias = System.getenv('CEIBA_SIGNING_KEY_ALIAS')
+def signingKeyPassword = System.getenv('CEIBA_SIGNING_KEY_PASSWORD')
+android {
+    namespace 'ec.customserviciosrs.ceibaii'
+    compileSdk 35
+    defaultConfig {
+        applicationId 'ec.customserviciosrs.ceibaii'
+        minSdk 24
+        targetSdk 35
+        versionCode 1
+        versionName '1.0.0'
+        buildConfigField 'String', 'WEB_URL', '"' + appUrl + '"'
+    }
+    buildFeatures { buildConfig true }
+    signingConfigs {
+        release {
+            if (signingPath && signingPassword && signingAlias && signingKeyPassword) {
+                storeFile file(signingPath)
+                storePassword signingPassword
+                keyAlias signingAlias
+                keyPassword signingKeyPassword
+            }
+        }
+    }
+    buildTypes {
+        release {
+            if (signingPath && signingPassword && signingAlias && signingKeyPassword) {
+                signingConfig signingConfigs.release
+            }
+            minifyEnabled false
+        }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}

@@ -193,13 +193,8 @@ async function recordHistoricEvents(vehicles: Vehicle[]) {
 // Obtener lista de dispositivos online desde la API ARMS de Ceiba II
 let lastOnline = new Set<string>();
 let lastOnlineAt = 0;
-async function getOnlineDevicesFromARMS(): Promise<Set<string>> {
+async function getOnlineDevicesFromARMS(deviceIds: string[]): Promise<Set<string>> {
   try {
-    // Primero obtener todos los deviceIds de la DB
-    const rows = await executeQuery<any>('SELECT deviceid FROM vehicledevice');
-    if (!rows || rows.length === 0) return new Set();
-    
-    const deviceIds = rows.map(r => r.deviceid).filter(Boolean);
     if (deviceIds.length === 0) return new Set();
     
     // Consultar la API ARMS para saber cuáles están online
@@ -274,7 +269,7 @@ async function loadVehiclesFromRealSource() {
     if (!rows || rows.length === 0) return;
     
     // Obtener lista de dispositivos online desde la API ARMS de Ceiba II
-    const onlineDevices = await getOnlineDevicesFromARMS();
+    const onlineDevices = await getOnlineDevicesFromARMS(rows.map((row: any) => String(row.deviceno || '').trim()).filter(Boolean));
     
     const gpsRaw = readLastGps();
     const gpsMap = new Map<string, any>();
@@ -294,7 +289,8 @@ async function loadVehiclesFromRealSource() {
         humanTime: p.t ? new Date(p.t * 1000).toLocaleTimeString('es-EC', { timeZone: 'America/Guayaquil' }) : '',
       });
     }
-    const mapped: Vehicle[] = rows.map((r: any, idx: number) => {
+    const previousVehicles = new Map(vehiclesState.map(vehicle => [vehicle.id, vehicle]));
+    const mapped: Vehicle[] = rows.map((r: any) => {
        const chCount = Math.max(0, parseInt(r.channelcount, 10) || 0);
        const enabledMask = r.channelenable === -1 ? (2 ** chCount - 1) : Number(r.channelenable ?? 0);
        const chNames = r.channelname ? String(r.channelname).split(',') : [];
@@ -304,7 +300,7 @@ async function loadVehiclesFromRealSource() {
         if (!(enabledMask & (1 << j))) continue;
         channels.push({ id: j + 1, channelNumber: j + 1, name: chNames[j] ? `${chNames[j]} [${j + 1}]` : `Cámara ${j + 1} [${j + 1}]`, status: isOnlineFromARMS ? 'buffering' as const : 'offline' as const, resolution: '', fps: 0, bitrate: '' });
       }
-      const prevVehicle = vehiclesState.find(v => v.id === String(r.id));
+      const prevVehicle = previousVehicles.get(String(r.id));
       const g = gpsMap.get(r.deviceno);
       let lat = prevVehicle?.lat ?? null;
       let lng = prevVehicle?.lng ?? null;
@@ -317,7 +313,7 @@ async function loadVehiclesFromRealSource() {
         lastUpdate = g.timestamp ? formatQuitoFromTs(g.timestamp) : (prevVehicle?.lastUpdate || '');
         // Usar el estado de ARMS en lugar de la lógica de tiempo
         status = mapVehicleStatus(speed, isOnlineFromARMS, freshGps);
-        if (freshGps && prevVehicle?.lastUpdate !== lastUpdate) {
+        if (freshGps && prevVehicle?.lastUpdate !== lastUpdate && (!prevVehicle || prevVehicle.lat !== lat || prevVehicle.lng !== lng)) {
           trail = [...(prevVehicle?.trail || []).slice(-20), [lat, lng] as [number, number]];
         }
         // Si está offline, conservar última velocidad 0 pero mantener trail

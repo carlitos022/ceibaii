@@ -22,6 +22,8 @@ export const MapView: React.FC<MapViewProps> = ({
   const mapInstanceRef = useRef<L.Map | null>(null);
   const markersRef = useRef<{ [key: string]: L.Marker }>({});
   const markerAnimationsRef = useRef<Record<string, number>>({});
+  const markerTargetsRef = useRef<Record<string, [number, number]>>({});
+  const markerIconsRef = useRef<Record<string, string>>({});
   const vehiclesRef = useRef(vehicles);
   vehiclesRef.current = vehicles;
   const geofenceLayersRef = useRef<L.LayerGroup | null>(null);
@@ -166,6 +168,8 @@ export const MapView: React.FC<MapViewProps> = ({
         delete markersRef.current[id];
         if (markerAnimationsRef.current[id]) cancelAnimationFrame(markerAnimationsRef.current[id]);
         delete markerAnimationsRef.current[id];
+        delete markerTargetsRef.current[id];
+        delete markerIconsRef.current[id];
       }
     }
     vehicles.forEach((vehicle) => {
@@ -175,13 +179,11 @@ export const MapView: React.FC<MapViewProps> = ({
       let badgeColor = '#6b7280';
       let badgeBg = '#6b7280';
       let statusSubtitle = vehicle.statusText;
-      let isPulsing = false;
 
       if (vehicle.status === 'moving') {
         badgeColor = '#ff9100';
         badgeBg = '#ff9100';
         statusSubtitle = `${vehicle.speed} km/h`;
-        isPulsing = true;
       } else if (vehicle.status === 'stopped') {
         badgeColor = '#ef4444';
         badgeBg = '#ff4444';
@@ -201,11 +203,7 @@ export const MapView: React.FC<MapViewProps> = ({
           isSelected ? 'scale-115 z-50' : 'z-20 hover:scale-105'
         }">
           <div class="relative flex items-center justify-center">
-            ${
-              isPulsing
-                ? `<div class="absolute inset-0 rounded-full animate-ping opacity-75" style="background-color: ${badgeBg};"></div>`
-                : ''
-            }
+            <div class="vehicle-status-pulse vehicle-status-pulse--${vehicle.status}" style="background-color: ${badgeBg};"></div>
             <div class="w-8 h-8 rounded-full border-2 border-white flex items-center justify-center relative z-10 shadow-[0_0_12px_rgba(0,0,0,0.8)]" style="background-color: ${badgeBg}; ${
         isSelected ? 'box-shadow: 0 0 16px #00d1ff, 0 0 24px rgba(0,209,255,0.6);' : ''
       }">
@@ -230,8 +228,19 @@ export const MapView: React.FC<MapViewProps> = ({
         iconAnchor: [30, 20]
       });
 
+      const iconKey = `${vehicle.status}|${statusSubtitle}|${vehicle.unitNumber}|${isSelected}`;
       if (markersRef.current[vehicle.id]) {
         const existingMarker = markersRef.current[vehicle.id];
+        const previousTarget = markerTargetsRef.current[vehicle.id];
+        if (previousTarget && previousTarget[0] === vehicle.lat && previousTarget[1] === vehicle.lng) {
+          if (markerIconsRef.current[vehicle.id] !== iconKey) {
+            existingMarker.setIcon(customIcon);
+            markerIconsRef.current[vehicle.id] = iconKey;
+            existingMarker.setZIndexOffset(isSelected ? 1000 : 100);
+          }
+          return;
+        }
+        markerTargetsRef.current[vehicle.id] = [vehicle.lat, vehicle.lng];
         const target = L.latLng(vehicle.lat, vehicle.lng);
         const start = existingMarker.getLatLng();
         const previousAnimation = markerAnimationsRef.current[vehicle.id];
@@ -257,7 +266,8 @@ export const MapView: React.FC<MapViewProps> = ({
         } else {
           existingMarker.setLatLng(target);
         }
-        existingMarker.setIcon(customIcon);
+        if (markerIconsRef.current[vehicle.id] !== iconKey) existingMarker.setIcon(customIcon);
+        markerIconsRef.current[vehicle.id] = iconKey;
         existingMarker.setZIndexOffset(isSelected ? 1000 : 100);
       } else {
         const marker = L.marker([vehicle.lat, vehicle.lng], {
@@ -273,6 +283,8 @@ export const MapView: React.FC<MapViewProps> = ({
 
         marker.addTo(mapInstanceRef.current!);
         markersRef.current[vehicle.id] = marker;
+        markerTargetsRef.current[vehicle.id] = [vehicle.lat, vehicle.lng];
+        markerIconsRef.current[vehicle.id] = iconKey;
       }
     });
 
@@ -293,14 +305,21 @@ export const MapView: React.FC<MapViewProps> = ({
     }
   }, [vehicles, selectedVehicle]);
 
+  const lastCenteredVehicleRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!mapInstanceRef.current || selectedVehicle?.lat == null || selectedVehicle?.lng == null) return;
-
-    mapInstanceRef.current.panTo([selectedVehicle.lat, selectedVehicle.lng], {
-      animate: true,
-      duration: 0.8
-    });
-  }, [selectedVehicle?.id]);
+    if (!selectedVehicle) {
+      lastCenteredVehicleRef.current = null;
+      return;
+    }
+    const map = mapInstanceRef.current;
+    if (!map || selectedVehicle.lat == null || selectedVehicle.lng == null) return;
+    const position = L.latLng(selectedVehicle.lat, selectedVehicle.lng);
+    const selectedChanged = lastCenteredVehicleRef.current !== selectedVehicle.id;
+    lastCenteredVehicleRef.current = selectedVehicle.id;
+    if (selectedChanged || !map.getBounds().pad(-0.15).contains(position)) {
+      map.panTo(position, { animate: true, duration: 0.8 });
+    }
+  }, [selectedVehicle?.id, selectedVehicle?.lat, selectedVehicle?.lng]);
 
   const toggleFullscreen = () => {
     if (!document.fullscreenElement) {

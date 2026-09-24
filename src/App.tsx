@@ -150,11 +150,13 @@ export default function App() {
     // Setup Server-Sent Events (SSE) for continuous live telemetry updates
     const streamToken = encodeURIComponent(auth.token);
     const eventSource = new EventSource(`/api/stream/telemetry?access_token=${streamToken}`);
+    let lastTelemetryAt = Date.now();
 
     eventSource.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
-        if (data.type === 'telemetry_update' && data.vehicles) {
+        if (data.type === 'telemetry_update' && Array.isArray(data.vehicles)) {
+          lastTelemetryAt = Date.now();
           setVehicles(data.vehicles);
           // Keep selected vehicle data updated with live coords
           setSelectedVehicle((prev) => {
@@ -170,7 +172,9 @@ export default function App() {
 
     // SSE is the primary 2.5 s channel. This poll prevents stale online/offline
     // state when a mobile proxy silently drops the EventSource connection.
-    const fallbackPoll = window.setInterval(() => { void fetchData(); }, 10000);
+    const fallbackPoll = window.setInterval(() => {
+      if (eventSource.readyState !== EventSource.OPEN || Date.now() - lastTelemetryAt > 10000) void fetchData();
+    }, 10000);
 
     return () => {
       eventSource.close();

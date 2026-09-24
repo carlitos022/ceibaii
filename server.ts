@@ -791,17 +791,28 @@ async function startServer() {
     res.setHeader('X-Accel-Buffering', 'no');
     res.flushHeaders();
 
-    const interval = setInterval(async () => {
+    let closed = false;
+    let timer: NodeJS.Timeout;
+    const sendTelemetry = async () => {
       try {
+        // An await may take longer than one interval; keep one request per connection.
+        if (closed || res.destroyed) return;
         const vehicles = await getAuthorizedVehicles(req);
-        if (!vehicles) return;
-        const quitoNow = new Date().toLocaleString('sv-SE', { timeZone: 'America/Guayaquil' });
-        res.write(`data: ${JSON.stringify({ type: 'telemetry_update', vehicles, timestamp: quitoNow })}\n\n`);
-      } catch (e) {}
-    }, 2500);
-
+        if (closed || res.destroyed) return;
+        if (vehicles && res.writableLength < 256 * 1024) {
+          const timestamp = new Date().toLocaleString('sv-SE', { timeZone: 'America/Guayaquil' });
+          res.write(`data: ${JSON.stringify({ type: 'telemetry_update', vehicles, timestamp })}\n\n`);
+        }
+      } catch (error) {
+        if (!closed && !res.destroyed) res.write(': telemetry retry\n\n');
+      } finally {
+        if (!closed) timer = setTimeout(sendTelemetry, 2500);
+      }
+    };
+    void sendTelemetry();
     req.on('close', () => {
-      clearInterval(interval);
+      closed = true;
+      clearTimeout(timer);
       res.end();
     });
   });
