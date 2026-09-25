@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import type { Vehicle } from './types';
+import OriginalLiveVideo from './OriginalLiveVideo';
 
 type Props = {
   token: string;
@@ -83,6 +84,7 @@ export default function Monitor({ token, username, onLogout }: Props) {
   const [detailSection, setDetailSection] = useState<DetailSection>('location');
   const [detailData, setDetailData] = useState<any>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [liveOpen, setLiveOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [stateQuery, setStateQuery] = useState('');
   const [sortMode, setSortMode] = useState<'plate' | 'time'>('time');
@@ -257,6 +259,10 @@ export default function Monitor({ token, username, onLogout }: Props) {
     void loadDetail('location');
   }
 
+  if (liveOpen && selected) {
+    return <OriginalLiveVideo token={token} vehicle={selected} onBack={() => setLiveOpen(false)} />;
+  }
+
   return (
     <div className="ceiba-monitor">
       <div className="ceiba-map-layout">
@@ -316,7 +322,7 @@ export default function Monitor({ token, username, onLogout }: Props) {
         <section className="ceiba-map-popup">
           <div className="ceiba-pop-title-row">
             <div className="ceiba-pop-title">{selected.unitNumber}</div>
-            <button className="ceiba-preview-button" title="Vista previa">
+            <button className="ceiba-preview-button" title="Vista previa" onClick={() => setLiveOpen(true)} disabled={!selected.channels?.length}>
               <img src={A + 'marker_video_selected.png'} alt="" />
               <span>Preview</span>
             </button>

@@ -984,3 +984,84 @@ footer {
     transform: translateX(-50%);
   }
 }
+
+.ceiba-live-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 1300;
+  display: flex;
+  flex-direction: column;
+  background: #002944;
+  color: #fff;
+}
+.ceiba-live-head {
+  min-height: 50px;
+  padding: max(8px, env(safe-area-inset-top)) 10px 8px;
+  display: grid;
+  grid-template-columns: 44px 1fr auto;
+  align-items: center;
+  background: #1e2744;
+  border-bottom: .5px solid rgba(255,255,255,.14);
+}
+.ceiba-live-head button {
+  width: 40px;
+  height: 40px;
+  border: 0;
+  background: transparent;
+  color: #fff;
+  font-size: 34px;
+  line-height: 1;
+}
+.ceiba-live-head strong {
+  text-align: center;
+  font-size: 15px;
+  font-weight: 500;
+}
+.ceiba-live-head span {
+  color: #a0a7b0;
+  font-size: 10px;
+}
+.ceiba-live-video-wrap {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  place-items: center;
+  background: #000;
+}
+.ceiba-live-video {
+  width: 100%;
+  height: 100%;
+  max-height: calc(100dvh - 115px);
+  object-fit: contain;
+  background: #000;
+}
+.ceiba-live-channels {
+  min-height: 64px;
+  display: flex;
+  overflow-x: auto;
+  background: #1e2744;
+  border-top: .5px solid rgba(255,255,255,.14);
+}
+.ceiba-live-channels button {
+  min-width: 86px;
+  padding: 7px 10px;
+  border: 0;
+  border-right: .5px solid rgba(255,255,255,.12);
+  background: transparent;
+  color: #a0a7b0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+}
+.ceiba-live-channels button.active {
+  color: #fff;
+  background: #202948;
+  box-shadow: inset 0 -3px 0 #10cc9e;
+}
+.ceiba-live-channels span {
+  font-size: 9px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

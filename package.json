@@ -15,12 +15,14 @@
     "crypto-js": "^4.2.0",
     "dotenv": "^17.2.3",
     "express": "^4.21.2",
+    "flv.js": "^1.6.2",
     "jsonwebtoken": "^9.0.2",
     "leaflet": "^1.9.4",
     "lucide-react": "^0.546.0",
     "mysql2": "^3.24.2",
     "react": "^19.0.1",
     "react-dom": "^19.0.1",
+    "socket.io-client": "^1.7.2",
     "vite": "^6.2.3"
   },
   "devDependencies": {

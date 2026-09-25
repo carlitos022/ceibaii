@@ -8,6 +8,8 @@ import { fileURLToPath } from 'url';
 import { createServer as createViteServer } from 'vite';
 import { executeQuery, getDbConfig, initDbPool, isDbConnected } from './server/db';
 import { getVehicles } from './server/ceiba-service';
+import { ceibaConfig, getLastGpsByDevice, getLastStateByDevice } from './server/ceiba-api';
+const ioClient: any = require('socket.io-client');
 
 dotenv.config();
 
@@ -251,6 +253,51 @@ async function start() {
       day: '/api/v1/basic/vehicle/detail/daytrip',
       sensor: '/api/v1/basic/vehicle/detail/io'
     };
+    if (section === 'location' && deviceId) {
+      try {
+        const [gpsResult, stateResult] = await Promise.allSettled([
+          getLastGpsByDevice([deviceId]),
+          getLastStateByDevice([deviceId])
+        ]);
+        const gps = gpsResult.status === 'fulfilled' ? gpsResult.value[0] : null;
+        const state = stateResult.status === 'fulfilled' ? stateResult.value[0] : null;
+        if (gps) {
+          return res.json({
+            source: 'ceiba-webapi',
+            section,
+            data: {
+              vehicle: vehicle.unitNumber,
+              plate: vehicle.plate,
+              group: vehicle.route,
+              terminalId: gps.TerminalID || deviceId,
+              latitude: gps.GpsLat,
+              longitude: gps.GpsLng,
+              speed: gps.Speed,
+              course: gps.Direction,
+              gpsTime: gps.GpsTime,
+              serverTime: gps.Time,
+              altitude: gps.Altitude,
+              accState: gps.AccState,
+              engineState: gps.EngineState,
+              engineTemp: gps.EngineTemp,
+              deviceTemp: gps.DeviceTemp,
+              ambientTemp: gps.AmbientTemp,
+              humidity: gps.Humidity,
+              mileage: gps.Mileage,
+              oil: gps.Oil,
+              driverName: gps.DriverName,
+              location: gps.Location,
+              gpsState: gps.State,
+              lastStateTime: state?.time || null,
+              lastStateType: state?.type ?? null
+            }
+          });
+        }
+      } catch (error) {
+        console.warn('[Ceiba Fleet webapi detail]', error);
+      }
+    }
+
     const native = sid ? nativeSessionCache.get(sid) : null;
     if (deviceId && native && native.expires > Date.now() && routeMap[section]) {
       try {
@@ -283,22 +330,151 @@ async function start() {
     return res.json({ source: 'fleet-fallback', section, data: null });
   });
 
+  app.get('/api/monitor/vehicle/:id/video-stream/:channel', requireAuth, async (req, res) => {
+    const token = readToken(req);
+    const channel = Number(req.params.channel);
+    if (!Number.isInteger(channel) || channel < 1) {
+      return res.status(400).json({ error: 'Canal invalido' });
+    }
+    const { uid, rid } = res.locals.auth;
+    const vehicles = await authorizedVehicles(uid, rid);
+    const vehicle = vehicles?.find(item => String(item.id) === String(req.params.id));
+    if (!vehicle) return res.status(404).json({ error: 'Vehiculo no encontrado o sin permisos' });
+    if (!vehicle.channels.some(ch => ch.channelNumber === channel)) {
+      return res.status(400).json({ error: 'Canal no disponible para esta unidad' });
+    }
+
+    try {
+      const qs = new URLSearchParams({
+        audio: String(req.query.audio ?? '1'),
+        stream: String(req.query.stream ?? '1')
+      });
+      const upstream = await fetch(
+        `http://127.0.0.1:3000/api/vehicles/${encodeURIComponent(req.params.id)}/video-stream/${channel}?${qs}`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+          signal: AbortSignal.timeout(15000)
+        }
+      );
+      const body: any = await upstream.json();
+      if (!upstream.ok || !body?.flvUrl) {
+        return res.status(upstream.status || 502).json(body || { error: 'No se pudo iniciar video' });
+      }
+      const flvUrl = `/api/monitor/vehicle/${encodeURIComponent(req.params.id)}/live/${channel}?audio=${qs.get('audio')}&stream=${qs.get('stream')}&access_token=${encodeURIComponent(token)}`;
+      return res.json({ ...body, flvUrl });
+    } catch (error: any) {
+      return res.status(502).json({ error: 'No se pudo conectar con el gateway de video', detail: error?.message });
+    }
+  });
+
+  app.get('/api/monitor/vehicle/:id/live/:channel', requireAuth, async (req, res) => {
+    const token = readToken(req);
+    const { uid, rid } = res.locals.auth;
+    const vehicles = await authorizedVehicles(uid, rid);
+    const vehicle = vehicles?.find(item => String(item.id) === String(req.params.id));
+    if (!vehicle) return res.status(404).json({ error: 'Vehiculo no encontrado o sin permisos' });
+
+    const qs = new URLSearchParams({
+      audio: String(req.query.audio ?? '1'),
+      stream: String(req.query.stream ?? '1'),
+      access_token: token
+    });
+    const target = `http://127.0.0.1:3000/api/vehicles/${encodeURIComponent(req.params.id)}/live/${encodeURIComponent(req.params.channel)}?${qs}`;
+    try {
+      const upstream = await fetch(target, {
+        headers: { Accept: 'video/x-flv, application/octet-stream' },
+        signal: AbortSignal.timeout(35000)
+      } as any);
+      res.status(upstream.status);
+      const contentType = upstream.headers.get('content-type');
+      if (contentType) res.setHeader('Content-Type', contentType);
+      res.setHeader('Cache-Control', 'no-store');
+      res.setHeader('X-Accel-Buffering', 'no');
+      if (!upstream.body) return res.end();
+      const { Readable } = await import('stream');
+      Readable.fromWeb(upstream.body as any).pipe(res);
+    } catch (error: any) {
+      if (!res.headersSent) return res.status(502).json({ error: 'Fallo el video en vivo', detail: error?.message });
+      res.destroy();
+    }
+  });
+
   app.get('/api/monitor/stream', requireAuth, async (_req, res) => {
     const { uid, rid } = res.locals.auth;
+    const ids = await authorizedDeviceIds(uid, rid);
+    if (!ids) return res.status(503).json({ error: 'No se pudieron obtener permisos de Ceiba II' });
+
+    const deviceIds = [...ids].map(String).filter(Boolean);
     res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
     res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders?.();
+
     let closed = false;
-    res.on('close', () => { closed = true; });
-    const send = async () => {
+    let upstream: any = null;
+    const push = (payload: unknown) => {
+      if (!closed) res.write(`data: ${JSON.stringify(payload)}\n\n`);
+    };
+    const sendSnapshot = async () => {
       if (closed) return;
       const vehicles = await authorizedVehicles(uid, rid);
-      if (!vehicles) return;
-      res.write(`data: ${JSON.stringify({ type: 'telemetry_update', vehicles, at: Date.now() })}\n\n`);
+      if (vehicles) push({ type: 'telemetry_update', vehicles, at: Date.now() });
     };
-    await send();
-    const timer = setInterval(send, 2500);
-    res.on('close', () => clearInterval(timer));
+
+    await sendSnapshot();
+
+    if (deviceIds.length > 0) {
+      const upstreamKey = wcmsLiveToken(uid, rid);
+      const { wcmsBase } = ceibaConfig();
+      upstream = ioClient.connect(wcmsBase, {
+        transports: ['websocket', 'polling'],
+        reconnection: true,
+        reconnectionDelay: 1000,
+        forceNew: true
+      });
+
+      upstream.on('connect', () => {
+        const auth = { didArray: deviceIds, key: upstreamKey };
+        upstream.emit('sub_gps', auth);
+        upstream.emit('sub_state', auth);
+        upstream.emit('sub_alarm', { ...auth, alarmType: [] });
+        push({ type: 'upstream_status', connected: true, at: Date.now() });
+      });
+      upstream.on('disconnect', () => {
+        push({ type: 'upstream_status', connected: false, at: Date.now() });
+      });
+      upstream.on('connect_error', () => {
+        push({ type: 'upstream_status', connected: false, at: Date.now() });
+      });
+      upstream.on('sub_gps', (data: any) => {
+        if (!data?.deviceno) return;
+        push({ type: 'gps_event', data, at: Date.now() });
+      });
+      upstream.on('sub_state', (data: any) => {
+        if (!data?.deviceno) return;
+        push({ type: 'state_event', data, at: Date.now() });
+      });
+      upstream.on('sub_alarm', (data: any) => {
+        if (!data?.deviceno) return;
+        push({ type: 'alarm_event', data, at: Date.now() });
+      });
+    }
+
+    const snapshotTimer = setInterval(sendSnapshot, 15000);
+    const heartbeatTimer = setInterval(() => {
+      if (!closed) res.write(': keepalive\n\n');
+    }, 20000);
+
+    const cleanup = () => {
+      if (closed) return;
+      closed = true;
+      clearInterval(snapshotTimer);
+      clearInterval(heartbeatTimer);
+      try { upstream?.disconnect(); } catch {}
+    };
+    res.on('close', cleanup);
+    res.on('finish', cleanup);
   });
 
   if (process.env.NODE_ENV === 'production') {
