@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { Bell, Crosshair, Gauge, LogOut, Menu, Navigation, RefreshCw, Search, Wifi, WifiOff, X } from 'lucide-react';
 import type { Vehicle } from './types';
 
 type Props = {
@@ -10,110 +9,180 @@ type Props = {
   onLogout: () => void;
 };
 
-function vehicleColor(status: Vehicle['status']) {
-  if (status === 'alarm') return '#ff3b3b';
-  if (status === 'moving') return '#ff9800';
-  if (status === 'stopped') return '#ef4444';
-  if (status === 'online') return '#facc15';
-  return '#64748b';
+type DetailSection = 'location' | 'trip' | 'day' | 'sensor';
+
+type Capabilities = {
+  serverType: string;
+  serverVersion: string;
+  nativeApi: boolean;
+  originalMonitor: {
+    vehicleStateButton: boolean;
+    mapResetButton: boolean;
+    detailTabs: boolean;
+    vehicleDrawer: boolean;
+  };
+};
+
+const A = '/ceiba-original/';
+
+function validPosition(v: Vehicle) {
+  return Number.isFinite(v.lat) && Number.isFinite(v.lng) &&
+    v.lat !== null && v.lng !== null && (v.lat !== 0 || v.lng !== 0);
 }
 
-function validPosition(vehicle: Vehicle) {
-  return Number.isFinite(vehicle.lat) && Number.isFinite(vehicle.lng) &&
-    vehicle.lat !== null && vehicle.lng !== null && (vehicle.lat !== 0 || vehicle.lng !== 0);
+function statusIcon(v: Vehicle) {
+  if (v.status === 'alarm') return A + 'car_warning_icon.png';
+  if (v.status === 'offline') return A + 'car_offline_icon.png';
+  return A + 'car_icon.png';
 }
 
-function markerIcon(vehicle: Vehicle) {
-  const color = vehicleColor(vehicle.status);
-  const alarm = vehicle.status === 'alarm';
-  return L.divIcon({
-    className: 'fleet-marker-shell',
-    html: `<div class="fleet-marker ${alarm ? 'fleet-marker-alarm' : ''}" style="--marker:${color};--heading:${vehicle.heading || 0}deg">
-      <div class="fleet-marker-pulse"></div>
-      <div class="fleet-marker-arrow">▲</div>
-      <span>${vehicle.unitNumber}</span>
-    </div>`,
-    iconSize: [76, 46],
-    iconAnchor: [38, 23]
-  });
+function markerHtml(v: Vehicle) {
+  const state = v.status === 'alarm' ? 'alarm' : v.status === 'offline' ? 'offline' : 'online';
+  return `<div class="ceiba-marker ceiba-marker-${state}">
+    <div class="ceiba-marker-ring"></div>
+    <div class="ceiba-marker-body" style="transform:rotate(${Number(v.heading || 0)}deg)">
+      <img src="${statusIcon(v)}" alt="" />
+    </div>
+    <div class="ceiba-marker-label">${String(v.unitNumber || '').replace(/</g, '&lt;')}</div>
+  </div>`;
+}
+
+function displayRows(data: any): Array<[string, string]> {
+  if (!data) return [['-', '-']];
+  const source = Array.isArray(data) ? data : Object.entries(data);
+  if (Array.isArray(data)) {
+    return data.slice(0, 40).map((item: any, index) => {
+      if (item && typeof item === 'object') {
+        const title = String(item.title ?? item.name ?? item.key ?? `#${index + 1}`);
+        const value = String(item.value ?? item.state ?? item.status ?? JSON.stringify(item));
+        return [title, value];
+      }
+      return [`#${index + 1}`, String(item)];
+    });
+  }
+  return (source as Array<[string, any]>)
+    .filter(([key]) => !['vehicle', 'plate'].includes(key))
+    .slice(0, 40)
+    .map(([key, value]) => [
+      key.replace(/([A-Z])/g, ' $1').replace(/^./, x => x.toUpperCase()),
+      value == null || value === '' ? '-' : typeof value === 'object' ? JSON.stringify(value) : String(value)
+    ]);
 }
 
 export default function Monitor({ token, username, onLogout }: Props) {
   const mapNodeRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
   const markersRef = useRef<Map<string, L.Marker>>(new Map());
+
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [vehicleStateOpen, setVehicleStateOpen] = useState(false);
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [detailSection, setDetailSection] = useState<DetailSection>('location');
+  const [detailData, setDetailData] = useState<any>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
   const [query, setQuery] = useState('');
-  const [connected, setConnected] = useState(false);
-  const [lastFeedAt, setLastFeedAt] = useState<number>(0);
+  const [stateQuery, setStateQuery] = useState('');
+  const [sortMode, setSortMode] = useState<'plate' | 'time'>('time');
+  const [sortAsc, setSortAsc] = useState(false);
+  const [capabilities, setCapabilities] = useState<Capabilities | null>(null);
 
   const selected = useMemo(
     () => vehicles.find(v => v.id === selectedId) || null,
     [vehicles, selectedId]
   );
-  const filtered = useMemo(() => {
+
+  const filteredVehicles = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return vehicles;
     return vehicles.filter(v =>
-      [v.unitNumber, v.plate, v.route, v.statusText].some(x => String(x || '').toLowerCase().includes(q))
+      [v.unitNumber, v.plate, v.route].some(x => String(x || '').toLowerCase().includes(q))
     );
   }, [vehicles, query]);
 
-  const counts = useMemo(() => ({
-    total: vehicles.length,
-    moving: vehicles.filter(v => v.status === 'moving').length,
-    stopped: vehicles.filter(v => v.status === 'stopped').length,
-    offline: vehicles.filter(v => v.status === 'offline').length
-  }), [vehicles]);
+  const groups = useMemo(() => {
+    const map = new Map<string, Vehicle[]>();
+    for (const v of filteredVehicles) {
+      const group = v.route || 'Sin grupo';
+      const list = map.get(group) || [];
+      list.push(v);
+      map.set(group, list);
+    }
+    return [...map.entries()];
+  }, [filteredVehicles]);
+
+  const stateVehicles = useMemo(() => {
+    const q = stateQuery.trim().toLowerCase();
+    const list = vehicles.filter(v =>
+      !q || [v.unitNumber, v.plate, v.route].some(x => String(x || '').toLowerCase().includes(q))
+    );
+    return [...list].sort((a, b) => {
+      const value = sortMode === 'plate'
+        ? String(a.unitNumber).localeCompare(String(b.unitNumber))
+        : String(a.lastUpdate || '').localeCompare(String(b.lastUpdate || ''));
+      return sortAsc ? value : -value;
+    });
+  }, [vehicles, stateQuery, sortMode, sortAsc]);
+
+  async function authFetch(url: string) {
+    const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    if (response.status === 401) {
+      onLogout();
+      throw new Error('Sesion expirada');
+    }
+    return response;
+  }
 
   async function loadVehicles() {
-    const response = await fetch('/api/monitor/vehicles', {
-      headers: { Authorization: `Bearer ${token}` }
-    });
-    if (response.status === 401) return onLogout();
-    if (!response.ok) throw new Error('No se pudo cargar Monitor');
+    const response = await authFetch('/api/monitor/vehicles');
+    if (!response.ok) throw new Error('No se pudieron cargar los vehiculos');
     const data = await response.json();
-    if (Array.isArray(data)) {
-      setVehicles(data);
-      setLastFeedAt(Date.now());
+    if (!Array.isArray(data)) return;
+    setVehicles(data);
+    setSelectedIds(prev => prev.size ? prev : new Set(data.map((v: Vehicle) => v.id)));
+  }
+
+  async function loadCapabilities() {
+    const response = await authFetch('/api/monitor/capabilities');
+    if (response.ok) setCapabilities(await response.json());
+  }
+
+  async function loadDetail(section: DetailSection) {
+    if (!selected) return;
+    setDetailSection(section);
+    setDetailLoading(true);
+    try {
+      const response = await authFetch(
+        `/api/monitor/vehicle/${encodeURIComponent(selected.id)}/detail?section=${section}`
+      );
+      const payload = await response.json();
+      setDetailData(payload?.data ?? null);
+    } finally {
+      setDetailLoading(false);
     }
   }
 
   useEffect(() => {
-    void loadVehicles().catch(() => {});
+    void Promise.all([loadVehicles(), loadCapabilities()]).catch(() => {});
     const es = new EventSource(`/api/monitor/stream?access_token=${encodeURIComponent(token)}`);
-    es.onopen = () => setConnected(true);
-    es.onerror = () => setConnected(false);
     es.onmessage = event => {
       try {
-        const data = JSON.parse(event.data);
-        if (data.type === 'telemetry_update' && Array.isArray(data.vehicles)) {
-          setVehicles(data.vehicles);
-          setConnected(true);
-          setLastFeedAt(Date.now());
+        const payload = JSON.parse(event.data);
+        if (payload.type === 'telemetry_update' && Array.isArray(payload.vehicles)) {
+          setVehicles(payload.vehicles);
         }
       } catch {}
     };
-    const fallback = window.setInterval(() => {
-      if (!connected || Date.now() - lastFeedAt > 10000) void loadVehicles().catch(() => {});
-    }, 10000);
-    return () => {
-      es.close();
-      window.clearInterval(fallback);
-    };
+    return () => es.close();
   }, [token]);
 
   useEffect(() => {
     if (!mapNodeRef.current || mapRef.current) return;
-    const map = L.map(mapNodeRef.current, { zoomControl: false, attributionControl: true })
+    const map = L.map(mapNodeRef.current, { zoomControl: false, attributionControl: false })
       .setView([-3.99, -79.20], 12);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19,
-      attribution: '&copy; OpenStreetMap'
-    }).addTo(map);
-    L.control.zoom({ position: 'bottomright' }).addTo(map);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
     mapRef.current = map;
     requestAnimationFrame(() => map.invalidateSize());
     return () => {
@@ -121,29 +190,32 @@ export default function Monitor({ token, username, onLogout }: Props) {
       mapRef.current = null;
     };
   }, []);
+
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
+    const visible = vehicles.filter(v => selectedIds.has(v.id) && validPosition(v));
     const seen = new Set<string>();
 
-    for (const vehicle of vehicles) {
-      if (!validPosition(vehicle)) continue;
+    for (const vehicle of visible) {
       seen.add(vehicle.id);
-      const latlng: L.LatLngExpression = [vehicle.lat as number, vehicle.lng as number];
+      const point: L.LatLngExpression = [vehicle.lat as number, vehicle.lng as number];
       let marker = markersRef.current.get(vehicle.id);
+      const icon = L.divIcon({
+        className: 'ceiba-marker-host',
+        html: markerHtml(vehicle),
+        iconSize: [74, 58],
+        iconAnchor: [37, 30]
+      });
       if (!marker) {
-        marker = L.marker(latlng, { icon: markerIcon(vehicle), riseOnHover: true })
+        marker = L.marker(point, { icon, riseOnHover: true })
           .addTo(map)
           .on('click', () => setSelectedId(vehicle.id));
         markersRef.current.set(vehicle.id, marker);
       } else {
-        marker.setLatLng(latlng);
-        marker.setIcon(markerIcon(vehicle));
+        marker.setLatLng(point);
+        marker.setIcon(icon);
       }
-      marker.bindTooltip(
-        `<strong>${vehicle.unitNumber}</strong><br>${vehicle.speed} km/h · ${vehicle.relativeTime || ''}`,
-        { direction: 'top', offset: [0, -16], opacity: .95 }
-      );
     }
 
     for (const [id, marker] of markersRef.current) {
@@ -152,110 +224,187 @@ export default function Monitor({ token, username, onLogout }: Props) {
         markersRef.current.delete(id);
       }
     }
-  }, [vehicles]);
+  }, [vehicles, selectedIds]);
 
-  function focusVehicle(vehicle: Vehicle) {
-    setSelectedId(vehicle.id);
+  function toggleVehicle(id: string) {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function focusVehicle(v: Vehicle) {
+    setSelectedId(v.id);
     setDrawerOpen(false);
-    if (mapRef.current && validPosition(vehicle)) {
-      mapRef.current.flyTo([vehicle.lat as number, vehicle.lng as number], 17, { duration: .6 });
+    if (validPosition(v) && mapRef.current) {
+      mapRef.current.setView([v.lat as number, v.lng as number], 16);
     }
   }
 
   function resetMap() {
-    const points = vehicles.filter(validPosition).map(v => [v.lat as number, v.lng as number] as [number, number]);
-    if (!mapRef.current) return;
-    if (points.length === 1) mapRef.current.flyTo(points[0], 16);
-    if (points.length > 1) mapRef.current.fitBounds(points, { padding: [35, 35], maxZoom: 15 });
+    const points = vehicles
+      .filter(v => selectedIds.has(v.id) && validPosition(v))
+      .map(v => [v.lat as number, v.lng as number] as [number, number]);
+    if (!mapRef.current || !points.length) return;
+    if (points.length === 1) mapRef.current.setView(points[0], 16);
+    else mapRef.current.fitBounds(points, { padding: [25, 25], maxZoom: 16 });
+  }
+
+  function openDetail() {
+    setDetailOpen(true);
+    void loadDetail('location');
   }
 
   return (
-    <div className="monitor-root">
-      <header className="monitor-header">
-        <button className="icon-btn" onClick={() => setDrawerOpen(true)} aria-label="Abrir unidades"><Menu /></button>
-        <div className="monitor-title">
-          <strong>Monitor</strong>
-          <span>{connected ? 'GPS en vivo' : 'Reconectando...'}</span>
-        </div>
-        <div className="monitor-account">
-          <span>{username}</span>
-          <button className="icon-btn" onClick={onLogout} aria-label="Cerrar sesion"><LogOut /></button>
-        </div>
-      </header>
+    <div className="ceiba-monitor">
+      <div className="ceiba-map-layout">
+        <div ref={mapNodeRef} className="ceiba-map" />
 
-      <section className="monitor-stats">
-        <div><strong>{counts.total}</strong><span>Unidades</span></div>
-        <div><strong>{counts.moving}</strong><span>En ruta</span></div>
-        <div><strong>{counts.stopped}</strong><span>Detenidas</span></div>
-        <div><strong>{counts.offline}</strong><span>Offline</span></div>
-      </section>
+        <button className="ceiba-original-button ceiba-btn-vehicle" onClick={() => setDrawerOpen(true)}>
+          <img src={A + 'car_btn_bg_selected.png'} alt="Vehiculos" />
+        </button>
 
-      <div className="monitor-map-wrap">
-        <div ref={mapNodeRef} className="monitor-map" />
-        <div className="map-actions">
-          <button className="map-action" onClick={resetMap} title="Mostrar toda la flota"><Crosshair size={21} /></button>
-          <button className="map-action" onClick={() => void loadVehicles()} title="Actualizar"><RefreshCw size={21} /></button>
-        </div>
-        <div className="feed-pill">
-          {connected ? <Wifi size={15} /> : <WifiOff size={15} />}
-          <span>{connected ? 'Conectado' : 'Sin enlace'}</span>
-        </div>
+        {capabilities?.originalMonitor.vehicleStateButton && (
+          <button className="ceiba-original-button ceiba-btn-state" onClick={() => setVehicleStateOpen(true)}>
+            <img src={A + 'ic_list_car.png'} alt="Estado de vehiculos" />
+          </button>
+        )}
+
+        {capabilities?.originalMonitor.mapResetButton && (
+          <button className="ceiba-original-button ceiba-btn-reset" onClick={resetMap}>
+            <img src={A + 'ic_map_reset.png'} alt="Restablecer mapa" />
+          </button>
+        )}
       </div>
 
-      {selected && (
-        <section className="vehicle-sheet">
-          <div className="sheet-grabber" />
-          <div className="sheet-head">
-            <div>
-              <div className="sheet-unit">{selected.unitNumber}</div>
-              <div className="sheet-route">{selected.route || 'Sin grupo/ruta'}</div>
+      <aside className={`ceiba-drawer ${drawerOpen ? 'open' : ''}`}>
+        <div className="ceiba-drawer-title">Vehiculos</div>
+        <div className="ceiba-drawer-search-row">
+          <button className="ceiba-refresh" onClick={() => void loadVehicles()} aria-label="Actualizar">↻</button>
+          <div className="ceiba-search-box">
+            <input value={query} onChange={e => setQuery(e.target.value)} maxLength={100} />
+            <img src={A + 'search_icon.png'} alt="" />
+          </div>
+        </div>
+        <div className="ceiba-divider" />
+        <div className="ceiba-tree">
+          {groups.map(([group, items]) => (
+            <div className="ceiba-tree-group" key={group}>
+              <div className="ceiba-tree-group-title">{group}</div>
+              {items.map(v => (
+                <div className="ceiba-tree-row" key={v.id}>
+                  <label className="ceiba-check">
+                    <input type="checkbox" checked={selectedIds.has(v.id)} onChange={() => toggleVehicle(v.id)} />
+                  </label>
+                  <img src={statusIcon(v)} alt="" />
+                  <button onClick={() => focusVehicle(v)}>
+                    <strong>{v.unitNumber}</strong>
+                    <span>{v.relativeTime || v.lastUpdate || ''}</span>
+                  </button>
+                </div>
+              ))}
             </div>
-            <button className="icon-btn" onClick={() => setSelectedId(null)} aria-label="Cerrar detalle"><X /></button>
+          ))}
+        </div>
+        <button className="ceiba-drawer-logout" onClick={onLogout}>Cerrar sesion · {username}</button>
+      </aside>
+      {drawerOpen && <button className="ceiba-drawer-overlay" onClick={() => setDrawerOpen(false)} />}
+
+      {selected && (
+        <section className="ceiba-map-popup">
+          <div className="ceiba-pop-title-row">
+            <div className="ceiba-pop-title">{selected.unitNumber}</div>
+            <button className="ceiba-preview-button" title="Vista previa">
+              <img src={A + 'marker_video_selected.png'} alt="" />
+              <span>Preview</span>
+            </button>
           </div>
-          <div className="vehicle-status-line">
-            <span className="status-dot" style={{ background: vehicleColor(selected.status) }} />
-            <strong>{selected.statusText}</strong>
-            <span>{selected.relativeTime}</span>
+          <div className="ceiba-pop-line"><span>Grupo</span><strong>{selected.route || '-'}</strong></div>
+          <div className="ceiba-pop-line"><span>Tiempo</span><strong>{selected.lastUpdate || '-'}</strong></div>
+          <div className="ceiba-pop-line"><span>Velocidad</span><strong>{selected.speed} km/h</strong></div>
+          <div className="ceiba-pop-line ceiba-pop-location">
+            <span>Ubicacion</span>
+            <strong>{validPosition(selected) ? `${selected.lat}, ${selected.lng}` : '-'}</strong>
+            <button onClick={openDetail}><img src={A + 'ic_show_detail.png'} alt="Detalle" /></button>
           </div>
-          <div className="detail-grid">
-            <div><Gauge size={18} /><span>Velocidad</span><strong>{selected.speed} km/h</strong></div>
-            <div><Navigation size={18} /><span>Direccion</span><strong>{Math.round(selected.heading || 0)}°</strong></div>
-            <div><Bell size={18} /><span>Estado</span><strong>{selected.status}</strong></div>
-            <div><Wifi size={18} /><span>MDVR</span><strong>{selected.camerasOnline || '-'}</strong></div>
-          </div>
-          <div className="detail-coords">
-            GPS: {selected.lat ?? '-'}, {selected.lng ?? '-'} · {selected.lastUpdate || 'sin reporte'}
+          {selected.status === 'alarm' && (
+            <div className="ceiba-pop-line"><span>Alarma</span><strong>{selected.statusText}</strong></div>
+          )}
+          <div className="ceiba-pop-actions">
+            <button><img src={A + 'marker_playback.png'} alt="" /><span>Playback</span></button>
+            <button><img src={A + 'marker_text.png'} alt="" /><span>Mensaje</span></button>
+            <button><img src={A + 'marker_capture.png'} alt="" /><span>Captura</span></button>
+            <button><img src={A + 'marker_intercom.png'} alt="" /><span>Hablar</span></button>
           </div>
         </section>
       )}
 
-      <aside className={`vehicle-drawer ${drawerOpen ? 'open' : ''}`}>
-        <div className="drawer-head">
-          <div><strong>Vehiculos</strong><span>{filtered.length} visibles</span></div>
-          <button className="icon-btn" onClick={() => setDrawerOpen(false)}><X /></button>
-        </div>
-        <label className="drawer-search">
-          <Search size={18} />
-          <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Buscar unidad o placa" />
-        </label>
-        <div className="vehicle-list">
-          {filtered.map(vehicle => (
-            <button key={vehicle.id} className="vehicle-row" onClick={() => focusVehicle(vehicle)}>
-              <span className="status-dot" style={{ background: vehicleColor(vehicle.status) }} />
-              <span className="vehicle-main">
-                <strong>{vehicle.unitNumber}</strong>
-                <small>{vehicle.route || vehicle.plate}</small>
-              </span>
-              <span className="vehicle-side">
-                <strong>{vehicle.speed} km/h</strong>
-                <small>{vehicle.relativeTime}</small>
-              </span>
+      {vehicleStateOpen && (
+        <section className="ceiba-fullscreen-panel ceiba-vehicle-state">
+          <div className="ceiba-state-top">
+            <button onClick={() => setVehicleStateOpen(false)}><img src={A + 'alarm_back.png'} alt="Atras" /></button>
+            <div className="ceiba-state-search">
+              <input value={stateQuery} onChange={e => setStateQuery(e.target.value)} />
+              <img src={A + 'search_icon.png'} alt="" />
+            </div>
+          </div>
+          <div className="ceiba-state-sort">
+            <button onClick={() => { setSortMode('plate'); setSortAsc(v => sortMode === 'plate' ? !v : true); }}>
+              Placa <img src={A + (sortMode === 'plate' ? (sortAsc ? 'ic_arrow_default.png' : 'ic_arrow_down.png') : 'ic_arrow_default.png')} alt="" />
             </button>
-          ))}
-          {!filtered.length && <div className="empty-list">No hay unidades para esta cuenta.</div>}
-        </div>
-      </aside>
-      {drawerOpen && <button className="drawer-backdrop" onClick={() => setDrawerOpen(false)} aria-label="Cerrar" />}
+            <button onClick={() => { setSortMode('time'); setSortAsc(v => sortMode === 'time' ? !v : false); }}>
+              Tiempo <img src={A + (sortMode === 'time' ? (sortAsc ? 'ic_arrow_default.png' : 'ic_arrow_down.png') : 'ic_arrow_default.png')} alt="" />
+            </button>
+          </div>
+          <div className="ceiba-state-list">
+            {stateVehicles.map(v => (
+              <button className="ceiba-state-item" key={v.id} onClick={() => { setVehicleStateOpen(false); focusVehicle(v); }}>
+                <img src={statusIcon(v)} alt="" />
+                <div>
+                  <strong>{v.unitNumber} -- {v.speed} km/h</strong>
+                  <span>{v.lastUpdate || ''}</span>
+                  <small>{v.route || ''}</small>
+                </div>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {detailOpen && selected && (
+        <section className="ceiba-fullscreen-panel ceiba-detail">
+          <div className="ceiba-detail-head">
+            <strong>{selected.unitNumber}</strong>
+            <button onClick={() => setDetailOpen(false)}>Cerrar</button>
+          </div>
+          <div className="ceiba-detail-tabs">
+            {([
+              ['location', 'Ubicacion'],
+              ['trip', 'Viaje'],
+              ['day', 'Dia'],
+              ['sensor', 'Sensor']
+            ] as Array<[DetailSection, string]>).map(([key, label]) => (
+              <button
+                key={key}
+                className={detailSection === key ? 'active' : ''}
+                onClick={() => void loadDetail(key)}
+              >{label}</button>
+            ))}
+          </div>
+          <div className="ceiba-detail-list">
+            {detailLoading
+              ? <div className="ceiba-detail-loading">Cargando...</div>
+              : displayRows(detailData).map(([label, value], index) => (
+                  <div className="ceiba-detail-row" key={label + index}>
+                    <span>{label}</span><strong>{value}</strong>
+                  </div>
+                ))
+            }
+          </div>
+        </section>
+      )}
     </div>
   );
 }

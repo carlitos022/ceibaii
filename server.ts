@@ -37,12 +37,44 @@ function readToken(req: express.Request) {
 }
 
 const authorizedDeviceCache = new Map<string, { expires: number; ids: Set<string> }>();
+const nativeSessionCache = new Map<string, { expires: number; key: string; userId?: number }>();
+const NATIVE_WEB_BASE = process.env.CEIBA_NATIVE_WEB_BASE || 'http://127.0.0.1:12056';
 
 function wcmsLiveToken(uid: number, rid: number) {
   const now = new Date();
   const pad = (n: number) => String(n).padStart(2, '0');
   const value = `wcms4.0|${rid}|${uid}|${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
   return encodeURIComponent(desEncrypt(value));
+}
+
+async function getNativeCeibaSession(username: string, password: string) {
+  try {
+    const params = new URLSearchParams({ username, password, opencheck: '1' });
+    const response = await fetch(`${NATIVE_WEB_BASE}/api/v1/basic/key?${params.toString()}`, {
+      signal: AbortSignal.timeout(5000)
+    });
+    const data: any = await response.json();
+    if (response.ok && data?.errorcode === 200 && data?.data?.key) {
+      return { key: String(data.data.key), userId: Number(data.data.userId || 0) || undefined };
+    }
+  } catch (error) {
+    console.warn('[Ceiba Fleet native login]', error);
+  }
+  return null;
+}
+
+async function nativeCeibaGet(pathname: string, key: string, params: Record<string, string>) {
+  const query = new URLSearchParams({ key, ...params });
+  const response = await fetch(`${NATIVE_WEB_BASE}${pathname}?${query.toString()}`, {
+    signal: AbortSignal.timeout(7000)
+  });
+  const contentType = String(response.headers.get('content-type') || '');
+  if (!contentType.includes('application/json')) {
+    throw new Error(`Ceiba II native API returned ${contentType || 'unknown content type'}`);
+  }
+  const data: any = await response.json();
+  if (!response.ok) throw new Error(`Ceiba II native API HTTP ${response.status}`);
+  return data;
 }
 
 async function start() {
@@ -95,12 +127,19 @@ async function start() {
         }
       }
 
-      const payload = { uid: Number(user.id), rid: Number(user.roleid), un: String(user.account) };
+      const sid = crypto.randomUUID();
+      const nativeSession = await getNativeCeibaSession(username, password);
+      if (nativeSession) {
+        nativeSessionCache.set(sid, { ...nativeSession, expires: Date.now() + 23 * 60 * 60 * 1000 });
+      }
+      const payload = { uid: Number(user.id), rid: Number(user.roleid), un: String(user.account), sid };
       const token = jwt.sign(payload, JWT_SECRET, { algorithm: 'HS256', expiresIn: '24h' });
       return res.json({
         code: 200,
         result: true,
         token,
+        nativeApi: Boolean(nativeSession),
+        serverVersion: '2.5.1.0.01',
         user: { uid: payload.uid, account: payload.un, roleid: payload.rid }
       });
     } catch (error) {
@@ -126,7 +165,7 @@ async function start() {
     try {
       const payload: any = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] });
       if (!Number.isInteger(Number(payload.uid)) || !Number.isInteger(Number(payload.rid))) throw new Error('invalid');
-      res.locals.auth = { uid: Number(payload.uid), rid: Number(payload.rid), un: String(payload.un || '') };
+      res.locals.auth = { uid: Number(payload.uid), rid: Number(payload.rid), un: String(payload.un || ''), sid: String(payload.sid || '') };
       next();
     } catch {
       return res.status(401).json({ code: 401, error: 'Sesion invalida o expirada' });
@@ -176,6 +215,72 @@ async function start() {
     const vehicles = await authorizedVehicles(uid, rid);
     if (!vehicles) return res.status(503).json({ error: 'No se pudieron obtener permisos de Ceiba II' });
     res.json(vehicles);
+  });
+
+  app.get('/api/monitor/capabilities', requireAuth, (req, res) => {
+    const { sid } = res.locals.auth;
+    const native = sid ? nativeSessionCache.get(sid) : null;
+    res.json({
+      serverType: 'cb2',
+      serverVersion: '2.5.1.0.01',
+      nativeApi: Boolean(native && native.expires > Date.now()),
+      originalMonitor: {
+        vehicleStateButton: false,
+        mapResetButton: false,
+        detailTabs: true,
+        vehicleDrawer: true
+      }
+    });
+  });
+
+  app.get('/api/monitor/vehicle/:id/detail', requireAuth, async (req, res) => {
+    const { uid, rid, sid } = res.locals.auth;
+    const vehicles = await authorizedVehicles(uid, rid);
+    const vehicle = vehicles?.find(item => String(item.id) === String(req.params.id));
+    if (!vehicle) return res.status(404).json({ error: 'Vehiculo no encontrado o sin permisos' });
+
+    const rows = await executeQuery<any>(
+      'SELECT deviceid, carlicence FROM vehicledevice WHERE id = ? LIMIT 1',
+      [req.params.id]
+    );
+    const deviceId = rows?.[0]?.deviceid ? String(rows[0].deviceid) : '';
+    const section = String(req.query.section || 'location');
+    const routeMap: Record<string, string> = {
+      location: '/api/v1/basic/vehicle/detail/gps',
+      trip: '/api/v1/basic/vehicle/detail/lasttrip',
+      day: '/api/v1/basic/vehicle/detail/daytrip',
+      sensor: '/api/v1/basic/vehicle/detail/io'
+    };
+    const native = sid ? nativeSessionCache.get(sid) : null;
+    if (deviceId && native && native.expires > Date.now() && routeMap[section]) {
+      try {
+        const data = await nativeCeibaGet(routeMap[section], native.key, { terid: deviceId });
+        if (data?.errorcode === 200 || data?.success === true) {
+          return res.json({ source: 'ceiba-native', section, data: data.data ?? data.result ?? data });
+        }
+      } catch (error) {
+        console.warn('[Ceiba Fleet monitor detail]', section, error);
+      }
+    }
+
+    if (section === 'location') {
+      return res.json({
+        source: 'fleet-fallback',
+        section,
+        data: {
+          vehicle: vehicle.unitNumber,
+          plate: vehicle.plate,
+          group: vehicle.route,
+          latitude: vehicle.lat,
+          longitude: vehicle.lng,
+          speed: vehicle.speed,
+          course: vehicle.heading,
+          gpsTime: vehicle.lastUpdate,
+          state: vehicle.statusText
+        }
+      });
+    }
+    return res.json({ source: 'fleet-fallback', section, data: null });
   });
 
   app.get('/api/monitor/stream', requireAuth, async (_req, res) => {
