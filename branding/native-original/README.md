@@ -1,15 +1,15 @@
-# CEIBA II original: diseño CustomServiciosRS
+# CEIBA II original: marca CustomServiciosRS
 
-Este directorio reproduce la personalización de una copia propia de `CEIBA II.apk` 3.3.0. El login, GPS, Live y panel lateral siguen en el código de la aplicación original. No publicar en GitHub el APK original, archivos descompilados, claves ni contraseñas.
+La versión actual se construye sobre una copia legítima de `CEIBA II.apk` 3.3.0. Conserva el login nativo, Monitor, GPS, Live y panel lateral. El primer fondo y la animación nativa usan el mismo primer fotograma, y el símbolo de la empresa permanece visible durante toda la entrada y el login.
 
 ## Compilar en Windows
 
-1. Decodificar con Apktool 3.0.3 **sin `-s`**: `java -jar apktool_3.0.3.jar d -f "CEIBA II.apk" -o decoded`.
-2. Establecer temporalmente `CSRS_GOOGLE_MAPS_KEY` en el entorno del proceso; ejecutar `python apply_v2.py decoded C:\customserviciosrs\logos\ceiba_logo_animado.svg`. El script genera el arte y aplica ajustes puntuales a recursos y smali.
-3. Compilar `CsrsAnimatedLogo.java` y `CsrsMapControls.java` con `javac -source 8 -target 8 -classpath <android.jar> -d helper-classes`; convertir las clases a dex con `d8 --min-api 24 --lib <android.jar> --output helper-dex <archivos .class>`.
+1. Decodificar con Apktool 3.0.3 sin `-s`: `java -jar apktool_3.0.3.jar d -f "CEIBA II.apk" -o decoded`.
+2. Definir `CSRS_GOOGLE_MAPS_KEY` privadamente en el entorno del proceso; ejecutar `python apply_v3.py decoded`. Este script llama a `brand_original.py`, `brand_v2.py` y `brand_frames.py`; además aplica los cambios puntuales a recursos y smali. Requiere Pillow y fuentes de Windows.
+3. Compilar **solo** `CsrsMapControls.java` con `javac -source 8 -target 8 -classpath <android.jar> -d helper-classes`; convertir esas clases a dex con `d8 --min-api 24 --lib <android.jar> --output helper-dex <archivos .class>`.
 4. Reconstruir con `java -jar apktool_3.0.3.jar b decoded -o premerge.apk`; después `python merge_helper_dex.py premerge.apk helper-dex\classes.dex unsigned.apk`.
-5. Alinear y firmar con la clave privada existente de CustomServiciosRS; verificar `apksigner verify --verbose` y `aapt dump badging`. No subir la APK ni la clave privada al repositorio público.
+5. Alinear y firmar con la clave privada de CustomServiciosRS; verificar `apksigner verify --verbose`, `aapt dump badging` y los archivos del ZIP. No subir la APK original, el código descompilado ni credenciales al repositorio.
 
-La pantalla previa de CEIBA II se reemplaza por el fondo de marca. El logotipo C se reproduce desde el SVG proporcionado en la entrada y el login; la entrada dura 3,1 segundos. En Monitor, los controles discretos añaden selector `NORMAL`/`HYBRID` y pantalla completa moviendo la **misma vista del mapa**, con sus marcadores. El login y sus tres campos permanecen intactos.
+La animación v3 consta de 24 fotogramas de 125 ms renderizados sobre las curvas del SVG de la marca y termina con el logo completo. Evita depender del SVG en una vista web; la versión anterior `apply_v2.py` se conserva como referencia histórica. El código de los campos de acceso y del Monitor no cambia respecto a v2; el selector de capas y pantalla completa reutilizan la instancia nativa del mapa.
 
-El paquete sigue siendo `com.googlemap.ceibaii`, firmado por CustomServiciosRS. Google Maps puede requerir autorizar ese paquete y el SHA-1 de esta firma en el proyecto de Google Cloud, con Maps SDK for Android habilitado y facturación configurada. Una clave web restringida por referente HTTP no sustituye a una clave Android autorizada. Solo una prueba real en dispositivo confirmará las teselas y los controles. Conserva la APK anterior como respaldo hasta validar el resultado.
+El paquete continúa como `com.googlemap.ceibaii` y v3 sube su `versionCode` a `2025111102` para actualizar la prueba anterior. Google Maps requiere que la clave permita el paquete y el SHA-1 de la firma, además de Maps SDK for Android habilitado. La imagen del mapa y la animación aún requieren comprobación en un teléfono real.
