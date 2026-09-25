@@ -115,7 +115,7 @@ Se comprobo video directo con cabecera FLV valida sin pasar por el proyecto ceib
 - minSdk 24
 - compileSdk 36
 - targetSdk 36
-- Java 17
+- Java 21
 - Android SDK: C:\Android\sdk
 - PWA: vite-plugin-pwa / Workbox.
 - Service worker: autoUpdate.

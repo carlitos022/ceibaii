@@ -31,3 +31,6 @@ reference/
 
 android/*exit*.txt
 android/build-jdk21-exit.txt
+
+# Installable test builds
+public/downloads/
