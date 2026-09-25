@@ -97,6 +97,11 @@ function makeEvent(v: Vehicle, eventType: string, title: string, description: st
 
 async function saveHistoricEvent(event: any) {
   if (!event || !isDbConnected()) return;
+  const lat = Number(event.lat);
+  const lng = Number(event.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+  event.lat = lat;
+  event.lng = lng;
   try {
     await ensureTrackerEventsTable();
     await executeQuery(
@@ -359,6 +364,7 @@ async function loadVehiclesFromRealSource() {
          camerasCount: 0,
         camerasTotal: chCount,
         driverName: undefined,
+        mdvrId: String(r.deviceno || ''),
         ignition,
          mileageKm: null,
          fuelLevelPct: null,

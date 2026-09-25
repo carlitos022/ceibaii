@@ -5,7 +5,10 @@ import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import CryptoJS from 'crypto-js';
 import { fileURLToPath } from 'url';
+import { Readable, Transform } from 'stream';
+import { pipeline } from 'stream/promises';
 import { createServer as createViteServer } from 'vite';
+import { CeibaLiveFlv } from './server/live-flv';
 import { executeQuery, getDbConfig, initDbPool, isDbConnected } from './server/db';
 import { getVehicles } from './server/ceiba-service';
 import { ceibaConfig, getLastGpsByDevice, getLastStateByDevice } from './server/ceiba-api';
@@ -79,9 +82,187 @@ async function nativeCeibaGet(pathname: string, key: string, params: Record<stri
   return data;
 }
 
+
+async function proxyCeibaLiveFlv(
+  req: express.Request,
+  res: express.Response,
+  deviceId: string,
+  channelNum: number,
+  uid: number,
+  rid: number
+) {
+  const requestAudio = String(req.query.audio ?? '1') !== '0';
+  const streamType = String(req.query.stream ?? '1') === '0' ? '0' : '1';
+  const { wcmsBase } = ceibaConfig();
+  const query = new URLSearchParams({
+    key: wcmsLiveToken(uid, rid),
+    terid: deviceId,
+    chl: String(channelNum),
+    audio: requestAudio ? '1' : '0',
+    st: streamType,
+    port: String(process.env.CEIBA_FLV_PORT || '12060'),
+    dt: 'mdvr'
+  });
+
+  const infoUrl = `${wcmsBase}/api/v1/basic/live/video?${query}`;
+  const controller = new AbortController();
+  let timeout = setTimeout(() => controller.abort(new Error('Tiempo de espera del CMS agotado')), 20000);
+  const touch = () => {
+    clearTimeout(timeout);
+    timeout = setTimeout(() => controller.abort(new Error('El CMS dejo de enviar datos')), 25000);
+  };
+  const onClose = () => controller.abort();
+  res.on('close', onClose);
+
+  try {
+    const info = await fetch(infoUrl, { signal: controller.signal });
+    const contentType = String(info.headers.get('content-type') || '');
+    const body: any = contentType.includes('application/json') ? await info.json() : null;
+    if (!info.ok || body?.errorcode !== 200 || !body?.data?.url) {
+      return res.status(502).json({
+        error: 'Ceiba II no pudo iniciar el video en vivo',
+        ceibaError: body?.errorcode ?? info.status
+      });
+    }
+
+    const liveUrl = new URL(body.data.url);
+    liveUrl.hostname = '127.0.0.1';
+    liveUrl.searchParams.set('svrid', '127.0.0.1');
+    liveUrl.searchParams.set('svrport', String(process.env.CEIBA_TRANSMIT_PORT || '17891'));
+    liveUrl.searchParams.set('guid', crypto.randomUUID());
+
+    const upstream = await fetch(liveUrl, {
+      headers: { Accept: 'video/x-flv, application/octet-stream' },
+      signal: controller.signal
+    } as any);
+
+    if (!upstream.ok) {
+      const detail = await upstream.text().catch(() => '');
+      return res.status(502).json({
+        error: 'Ceiba II no entrego video en vivo',
+        upstreamStatus: upstream.status,
+        detail: detail.slice(0, 300)
+      });
+    }
+    if (!upstream.body) return res.status(502).json({ error: 'El CMS no entrego datos de video' });
+
+    touch();
+    res.status(upstream.status);
+    res.setHeader('Content-Type', upstream.headers.get('content-type') || 'video/x-flv');
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.setHeader('Connection', 'keep-alive');
+
+    const activity = new Transform({
+      transform(chunk, _encoding, done) {
+        touch();
+        done(null, chunk);
+      }
+    });
+    await pipeline(
+      Readable.fromWeb(upstream.body as any),
+      activity,
+      new CeibaLiveFlv(),
+      res,
+      { signal: controller.signal }
+    );
+  } catch (error: any) {
+    if (!res.headersSent && !res.destroyed) {
+      res.status(controller.signal.aborted ? 504 : 502).json({
+        error: 'Error conectando al stream Ceiba II',
+        detail: controller.signal.reason?.message || error?.message
+      });
+    } else if (!res.destroyed) {
+      res.destroy();
+    }
+  } finally {
+    clearTimeout(timeout);
+    controller.abort();
+    res.off('close', onClose);
+  }
+}
+
+type MonitorPowers = {
+  realTimeVideo: boolean;
+  devicePlayback: boolean;
+  capturePicture: boolean;
+  talk: boolean;
+  sendMessage: boolean;
+  checkAlarm: boolean;
+  handleAlarm: boolean;
+};
+
+const ORIGINAL_POWER_DEFAULTS: MonitorPowers = {
+  realTimeVideo: true,
+  devicePlayback: true,
+  capturePicture: true,
+  talk: true,
+  sendMessage: true,
+  checkAlarm: true,
+  handleAlarm: true
+};
+
+function applyAuthorityRows(rows: any[], base: MonitorPowers = ORIGINAL_POWER_DEFAULTS): MonitorPowers {
+  const next = { ...base };
+  const setters: Record<string, keyof MonitorPowers> = {
+    '303': 'realTimeVideo',
+    '308': 'devicePlayback',
+    '314': 'capturePicture',
+    '301-4': 'talk',
+    '301-10': 'sendMessage',
+    '306': 'checkAlarm',
+    '306-1': 'handleAlarm'
+  };
+  for (const row of rows || []) {
+    const key = String(row?.k ?? row?.key ?? '');
+    const field = setters[key];
+    if (!field) continue;
+    const value = Number(row?.v ?? row?.value);
+    if (value === 0 || value === 1) next[field] = value === 1;
+  }
+  return next;
+}
+
+async function resolveMonitorPowers(uid: number, rid: number, sid: string): Promise<{ powers: MonitorPowers; source: string }> {
+  const native = sid ? nativeSessionCache.get(sid) : null;
+  const keys: Array<{ key: string; source: string }> = [];
+  if (native && native.expires > Date.now()) keys.push({ key: native.key, source: 'ceiba-native-authority' });
+  keys.push({ key: wcmsLiveToken(uid, rid), source: 'ceiba-web-authority' });
+
+  for (const candidate of keys) {
+    try {
+      const data = await nativeCeibaGet('/api/v1/basic/authority', candidate.key, {});
+      if (Array.isArray(data?.data)) {
+        return { powers: applyAuthorityRows(data.data), source: candidate.source };
+      }
+    } catch {}
+  }
+  return { powers: { ...ORIGINAL_POWER_DEFAULTS }, source: 'apk-defaults' };
+}
+
 async function start() {
   const app = express();
   app.disable('x-powered-by');
+
+  const nativeOrigins = new Set([
+    'https://localhost',
+    'http://localhost',
+    'capacitor://localhost'
+  ]);
+  app.use((req, res, next) => {
+    const origin = String(req.headers.origin || '');
+    if (nativeOrigins.has(origin)) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Vary', 'Origin');
+      res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+      res.setHeader('Access-Control-Max-Age', '86400');
+    }
+    if (req.method === 'OPTIONS') return res.sendStatus(204);
+    next();
+  });
+
   app.use(express.json({ limit: '64kb' }));
 
   await initDbPool();
@@ -260,7 +441,7 @@ async function start() {
           getLastStateByDevice([deviceId])
         ]);
         const gps = gpsResult.status === 'fulfilled' ? gpsResult.value[0] : null;
-        const state = stateResult.status === 'fulfilled' ? stateResult.value[0] : null;
+        const lastState = stateResult.status === 'fulfilled' ? stateResult.value[0] : null;
         if (gps) {
           return res.json({
             source: 'ceiba-webapi',
@@ -288,8 +469,8 @@ async function start() {
               driverName: gps.DriverName,
               location: gps.Location,
               gpsState: gps.State,
-              lastStateTime: state?.time || null,
-              lastStateType: state?.type ?? null
+              lastStateTime: lastState?.time || null,
+              lastStateType: lastState?.type ?? null
             }
           });
         }
@@ -340,63 +521,61 @@ async function start() {
     const vehicles = await authorizedVehicles(uid, rid);
     const vehicle = vehicles?.find(item => String(item.id) === String(req.params.id));
     if (!vehicle) return res.status(404).json({ error: 'Vehiculo no encontrado o sin permisos' });
+    const channelInfo = vehicle.channels.find(ch => ch.channelNumber === channel);
+    if (!channelInfo) return res.status(400).json({ error: 'Canal no disponible para esta unidad' });
+
+    let deviceId = String(vehicle.mdvrId || '');
+    if (!deviceId) {
+      const rows = await executeQuery<any>('SELECT deviceid FROM vehicledevice WHERE id = ? LIMIT 1', [vehicle.id]);
+      deviceId = rows?.[0]?.deviceid ? String(rows[0].deviceid) : '';
+    }
+    if (!deviceId) return res.status(503).json({ error: 'No se encontro el identificador MDVR en Ceiba II' });
+
+    const audio = String(req.query.audio ?? '1') === '0' ? '0' : '1';
+    const stream = String(req.query.stream ?? '1') === '0' ? '0' : '1';
+    const flvUrl = `/api/monitor/vehicle/${encodeURIComponent(req.params.id)}/live/${channel}?audio=${audio}&stream=${stream}&access_token=${encodeURIComponent(token)}`;
+    const cfg = ceibaConfig();
+
+    return res.json({
+      vehicleId: vehicle.id,
+      unitNumber: vehicle.unitNumber,
+      deviceId,
+      channelNumber: channel,
+      channelName: channelInfo.name || `CH${channel}`,
+      protocol: 'Ceiba II WCMS5 live FLV',
+      flvUrl,
+      audioUrl: audio === '1' ? flvUrl : undefined,
+      live: true,
+      gateway: {
+        wcmsPort: cfg.wcmsPort,
+        flvPort: Number(process.env.CEIBA_FLV_PORT || 12060),
+        gtPort: Number(process.env.CEIBA_TRANSMIT_PORT || 17891)
+      },
+      status: channelInfo.status || 'live'
+    });
+  });
+
+  app.get('/api/monitor/vehicle/:id/live/:channel', requireAuth, async (req, res) => {
+    const { uid, rid } = res.locals.auth;
+    const channel = Number(req.params.channel);
+    if (!Number.isInteger(channel) || channel < 1) {
+      return res.status(400).json({ error: 'Canal invalido' });
+    }
+    const vehicles = await authorizedVehicles(uid, rid);
+    const vehicle = vehicles?.find(item => String(item.id) === String(req.params.id));
+    if (!vehicle) return res.status(404).json({ error: 'Vehiculo no encontrado o sin permisos' });
     if (!vehicle.channels.some(ch => ch.channelNumber === channel)) {
       return res.status(400).json({ error: 'Canal no disponible para esta unidad' });
     }
 
-    try {
-      const qs = new URLSearchParams({
-        audio: String(req.query.audio ?? '1'),
-        stream: String(req.query.stream ?? '1')
-      });
-      const upstream = await fetch(
-        `http://127.0.0.1:3000/api/vehicles/${encodeURIComponent(req.params.id)}/video-stream/${channel}?${qs}`,
-        {
-          headers: { Authorization: `Bearer ${token}` },
-          signal: AbortSignal.timeout(15000)
-        }
-      );
-      const body: any = await upstream.json();
-      if (!upstream.ok || !body?.flvUrl) {
-        return res.status(upstream.status || 502).json(body || { error: 'No se pudo iniciar video' });
-      }
-      const flvUrl = `/api/monitor/vehicle/${encodeURIComponent(req.params.id)}/live/${channel}?audio=${qs.get('audio')}&stream=${qs.get('stream')}&access_token=${encodeURIComponent(token)}`;
-      return res.json({ ...body, flvUrl });
-    } catch (error: any) {
-      return res.status(502).json({ error: 'No se pudo conectar con el gateway de video', detail: error?.message });
+    let deviceId = String(vehicle.mdvrId || '');
+    if (!deviceId) {
+      const rows = await executeQuery<any>('SELECT deviceid FROM vehicledevice WHERE id = ? LIMIT 1', [vehicle.id]);
+      deviceId = rows?.[0]?.deviceid ? String(rows[0].deviceid) : '';
     }
-  });
+    if (!deviceId) return res.status(503).json({ error: 'No se encontro el identificador MDVR en Ceiba II' });
 
-  app.get('/api/monitor/vehicle/:id/live/:channel', requireAuth, async (req, res) => {
-    const token = readToken(req);
-    const { uid, rid } = res.locals.auth;
-    const vehicles = await authorizedVehicles(uid, rid);
-    const vehicle = vehicles?.find(item => String(item.id) === String(req.params.id));
-    if (!vehicle) return res.status(404).json({ error: 'Vehiculo no encontrado o sin permisos' });
-
-    const qs = new URLSearchParams({
-      audio: String(req.query.audio ?? '1'),
-      stream: String(req.query.stream ?? '1'),
-      access_token: token
-    });
-    const target = `http://127.0.0.1:3000/api/vehicles/${encodeURIComponent(req.params.id)}/live/${encodeURIComponent(req.params.channel)}?${qs}`;
-    try {
-      const upstream = await fetch(target, {
-        headers: { Accept: 'video/x-flv, application/octet-stream' },
-        signal: AbortSignal.timeout(35000)
-      } as any);
-      res.status(upstream.status);
-      const contentType = upstream.headers.get('content-type');
-      if (contentType) res.setHeader('Content-Type', contentType);
-      res.setHeader('Cache-Control', 'no-store');
-      res.setHeader('X-Accel-Buffering', 'no');
-      if (!upstream.body) return res.end();
-      const { Readable } = await import('stream');
-      Readable.fromWeb(upstream.body as any).pipe(res);
-    } catch (error: any) {
-      if (!res.headersSent) return res.status(502).json({ error: 'Fallo el video en vivo', detail: error?.message });
-      res.destroy();
-    }
+    await proxyCeibaLiveFlv(req, res, deviceId, channel, uid, rid);
   });
 
   app.get('/api/monitor/stream', requireAuth, async (_req, res) => {

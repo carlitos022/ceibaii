@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import flvjs from 'flv.js';
 import type { Vehicle } from './types';
+import { apiUrl } from './api';
 
 type Props = {
   token: string;
@@ -26,7 +27,7 @@ export default function OriginalLiveVideo({ token, vehicle, onBack }: Props) {
       setState('Conectando...');
       try {
         const response = await fetch(
-          `/api/monitor/vehicle/${encodeURIComponent(vehicle.id)}/video-stream/${channel}?audio=1&stream=1`,
+          apiUrl(`/api/monitor/vehicle/${encodeURIComponent(vehicle.id)}/video-stream/${channel}?audio=1&stream=1`),
           { headers: { Authorization: `Bearer ${token}` }, signal: controller.signal }
         );
         const data = await response.json();
@@ -34,7 +35,7 @@ export default function OriginalLiveVideo({ token, vehicle, onBack }: Props) {
         if (!flvjs.isSupported()) throw new Error('Este dispositivo no admite FLV/MSE');
 
         player = flvjs.createPlayer(
-          { type: 'flv', isLive: true, url: data.flvUrl },
+          { type: 'flv', isLive: true, url: apiUrl(data.flvUrl) },
           {
             enableStashBuffer: false,
             lazyLoad: false,

@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Ceiba Fleet</string>
+    <string name="title_activity_main">Ceiba Fleet</string>
+    <string name="package_name">com.customserviciosrs.ceibafleet</string>
+    <string name="custom_url_scheme">com.customserviciosrs.ceibafleet</string>
+</resources>

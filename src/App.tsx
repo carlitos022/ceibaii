@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { ArrowRight, Eye, EyeOff, Lock, User } from 'lucide-react';
 import Monitor from './Monitor';
+import { apiUrl } from './api';
 
 type SessionUser = {
   uid: number;
@@ -94,7 +95,7 @@ export default function App() {
     const password = String(data.get('password') || '');
 
     try {
-      const response = await fetch('/api/auth/login', {
+      const response = await fetch(apiUrl('/api/auth/login'), {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ username, password })

@@ -25,3 +25,9 @@ reference/*.py
 Thumbs.db
 .vscode/
 .idea/
+
+# Local APK analysis and diagnostic probes
+reference/
+
+android/*exit*.txt
+android/build-jdk21-exit.txt

@@ -3,6 +3,7 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import type { Vehicle } from './types';
 import OriginalLiveVideo from './OriginalLiveVideo';
+import { apiUrl } from './api';
 
 type Props = {
   token: string;
@@ -129,7 +130,7 @@ export default function Monitor({ token, username, onLogout }: Props) {
   }, [vehicles, stateQuery, sortMode, sortAsc]);
 
   async function authFetch(url: string) {
-    const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    const response = await fetch(apiUrl(url), { headers: { Authorization: `Bearer ${token}` } });
     if (response.status === 401) {
       onLogout();
       throw new Error('Sesion expirada');
@@ -168,12 +169,61 @@ export default function Monitor({ token, username, onLogout }: Props) {
 
   useEffect(() => {
     void Promise.all([loadVehicles(), loadCapabilities()]).catch(() => {});
-    const es = new EventSource(`/api/monitor/stream?access_token=${encodeURIComponent(token)}`);
+    const es = new EventSource(apiUrl(`/api/monitor/stream?access_token=${encodeURIComponent(token)}`));
     es.onmessage = event => {
       try {
         const payload = JSON.parse(event.data);
         if (payload.type === 'telemetry_update' && Array.isArray(payload.vehicles)) {
           setVehicles(payload.vehicles);
+          return;
+        }
+        if (payload.type === 'gps_event' && payload.data?.deviceno) {
+          const data = payload.data;
+          const lat = Number(data.lat);
+          const lng = Number(data.lng);
+          const speed = Math.max(0, Number(data.speed) || 0);
+          setVehicles(prev => prev.map(vehicle => {
+            if (String(vehicle.mdvrId || '') !== String(data.deviceno)) return vehicle;
+            const status = Number(data.state) === 2 ? 'alarm' : speed > 5 ? 'moving' : 'stopped';
+            return {
+              ...vehicle,
+              lat: Number.isFinite(lat) ? lat : vehicle.lat,
+              lng: Number.isFinite(lng) ? lng : vehicle.lng,
+              speed,
+              heading: Number(data.direction) || 0,
+              lastUpdate: String(data.dateTime || vehicle.lastUpdate || ''),
+              relativeTime: 'ahora',
+              status,
+              statusText: status === 'alarm' ? 'Alarma activa' : speed > 5 ? `Moviendo - ${speed} km/h` : 'Detenido',
+              altitudeMeters: Number.isFinite(Number(data.altitude)) ? Number(data.altitude) : vehicle.altitudeMeters
+            };
+          }));
+          return;
+        }
+        if (payload.type === 'state_event' && payload.data?.deviceno) {
+          const data = payload.data;
+          setVehicles(prev => prev.map(vehicle => {
+            if (String(vehicle.mdvrId || '') !== String(data.deviceno)) return vehicle;
+            const state = Number(data.state);
+            const status = state === 2 ? 'alarm' : state === 0 ? 'offline' : vehicle.speed > 5 ? 'moving' : 'online';
+            return {
+              ...vehicle,
+              status,
+              statusText: status === 'alarm' ? 'Alarma activa' : status === 'offline' ? 'Sin conexion' : vehicle.speed > 5 ? `Moviendo - ${vehicle.speed} km/h` : 'Conectado'
+            };
+          }));
+          return;
+        }
+        if (payload.type === 'alarm_event' && payload.data?.deviceno) {
+          const data = payload.data;
+          setVehicles(prev => prev.map(vehicle => {
+            if (String(vehicle.mdvrId || '') !== String(data.deviceno)) return vehicle;
+            return {
+              ...vehicle,
+              status: 'alarm',
+              statusText: data.type != null ? `Alarma tipo ${data.type}` : 'Alarma activa'
+            };
+          }));
         }
       } catch {}
     };
