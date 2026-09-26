@@ -23,6 +23,7 @@ interface AuthState {
 }
 
 export default function App() {
+  const embeddedVivo = new URLSearchParams(window.location.search).get('embed') === 'vivo';
   // Primary States
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [selectedVehicle, setSelectedVehicle] = useState<Vehicle | null>(null);
@@ -41,7 +42,7 @@ export default function App() {
 
   // Auth States
   const [auth, setAuth] = useState<AuthState>({ user: null, token: null });
-  const [showSplash, setShowSplash] = useState(true);
+  const [showSplash, setShowSplash] = useState(!embeddedVivo);
   const [showLogin, setShowLogin] = useState(false);
   const [loginError, setLoginError] = useState('');
   const [isLoggingIn, setIsLoggingIn] = useState(false);
@@ -75,12 +76,17 @@ export default function App() {
 
   // Splash screen
   useEffect(() => {
+    if (embeddedVivo) {
+      setShowSplash(false);
+      setShowLogin(!auth.token);
+      return;
+    }
     const timer = setTimeout(() => {
       setShowSplash(false);
       setShowLogin(!auth.token);
     }, 2000);
     return () => clearTimeout(timer);
-  }, [auth.token]);
+  }, [auth.token, embeddedVivo]);
 
   // Helpers to normalize API responses (handles both new mock API and old Ceiba 12058 API wrapped in {code,result})
   const normalizeArray = <T,>(data: any, fallback: T[]): T[] => {
@@ -111,10 +117,10 @@ export default function App() {
     try {
       const [vehRaw, geoRaw, altRaw, libRaw, dlRaw] = await Promise.all([
         safeFetch('/api/vehicles', null),
-        safeFetch('/api/geofences', null),
-        safeFetch('/api/alerts', null),
-        safeFetch('/api/library', null),
-        safeFetch('/api/downloads', null)
+        embeddedVivo ? Promise.resolve(null) : safeFetch('/api/geofences', null),
+        embeddedVivo ? Promise.resolve(null) : safeFetch('/api/alerts', null),
+        embeddedVivo ? Promise.resolve(null) : safeFetch('/api/library', null),
+        embeddedVivo ? Promise.resolve(null) : safeFetch('/api/downloads', null)
       ]);
 
       const vehData = vehRaw ? normalizeVehicles(vehRaw) : [];
@@ -141,7 +147,7 @@ export default function App() {
       setLibrary([]);
       setDownloads([]);
     }
-  }, []);
+  }, [embeddedVivo]);
 
   useEffect(() => {
     if (!auth.token || showSplash) return;
@@ -392,6 +398,11 @@ export default function App() {
 
   // Show Login Screen
   if (showLogin) {
+    if (embeddedVivo) return (
+      <div className="h-screen flex items-center justify-center bg-[#011420] text-cyan-100 px-6 text-center">
+        Sesion de Vivo no disponible. Inicia sesion nuevamente en CSRS X.
+      </div>
+    );
     return (
       <div id="view-login" className="fixed inset-0 z-50 items-center justify-center p-4" style={{ display: 'flex', background: '#020c17' }}>
         <div className="absolute inset-0 pointer-events-none opacity-20">
@@ -514,6 +525,13 @@ export default function App() {
         onOpenVideo={handleOpenVideo}
       />
 
+      {embeddedVivo && activeTab !== 'vivo' && (
+        <button type="button" onClick={() => setActiveTab('vivo')}
+          className="px-4 py-2 text-sm font-semibold text-cyan-200 bg-[#08283d] border-b border-cyan-800">
+          Volver a Vivo
+        </button>
+      )}
+
       {/* Main View Area */}
       <main className="relative flex-1 w-full h-full overflow-hidden bg-[radial-gradient(circle_at_top,rgba(0,209,255,0.06),transparent_32%)]">
         {/* Tab 1: Live Interactive Map (Vivo) - En Vivo MDVR con contadores reales + barra lateral unidades */}
@@ -623,11 +641,11 @@ export default function App() {
       />
 
       {/* Bottom 5-Tab Navigation Bar */}
-      <BottomNavBar
+      {!embeddedVivo && <BottomNavBar
         activeTab={activeTab}
         onTabChange={(tab) => setActiveTab(tab)}
         unreadAlertsCount={unreadAlertsCount}
-      />
+      />}
     </div>
   );
 }
