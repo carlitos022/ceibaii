@@ -14,7 +14,7 @@ import java.util.*;
 public final class CsrsDownloadsTabs {
   private static final String URL="http://209.126.77.129:12058/";
   private static String pendingUser,pendingPassword;
-  private static View overlay,button,monitorView;
+  private static View overlay,errorPanel,button,monitorView;
   private static boolean checking;
   private CsrsDownloadsTabs(){}
   public static void capture(Object user){
@@ -101,11 +101,11 @@ public final class CsrsDownloadsTabs {
       try(InputStream in=h.getInputStream()){while((n=in.read(buf))!=-1){b.write(buf,0,n);if(b.size()>8192)return;}}
       JSONObject result=new JSONObject(b.toString("UTF-8"));
       if(result.getJSONObject("user").getInt("rid")!=1)return;
-      String cookie=h.getHeaderField("Set-Cookie");
-      if(cookie==null||!cookie.startsWith("sd_session="))return;
+      String token=result.optString("token","");
+      if(token.isEmpty())return;
       root.post(()->{
         android.webkit.CookieManager cm=android.webkit.CookieManager.getInstance();cm.setAcceptCookie(true);
-        cm.setCookie(URL,cookie);cm.flush();addTab(root,bar,content,monitor);
+        cm.setCookie(URL,"sd_session="+token+"; Path=/");cm.flush();addTab(root,bar,content,monitor);
       });
     }catch(Exception ex){android.util.Log.w("CsrsTabs","Descargas no disponibles: "+ex.getClass().getSimpleName());}
     finally{checking=false;}
@@ -130,6 +130,8 @@ public final class CsrsDownloadsTabs {
     pos.leftMargin=dp(c,8);bar.addView(item,pos);
     button=item;monitorView=monitor;
     item.setOnClickListener(v->{
+      if(errorPanel!=null&&errorPanel.getParent()==content)content.removeView(errorPanel);
+      errorPanel=null;
       if(overlay==null||overlay.getParent()!=content){
         if(overlay!=null&&overlay.getParent() instanceof android.view.ViewGroup)
           ((android.view.ViewGroup)overlay.getParent()).removeView(overlay);
@@ -145,8 +147,8 @@ public final class CsrsDownloadsTabs {
             // Keep the login node: the existing script uses it during /api/auth/verify.
             view.evaluateJavascript(
               "var x=document.getElementById('login-view');if(x){x.style.display='none';}",null);
-            view.evaluateJavascript("fetch('/api/auth/verify',{credentials:'same-origin'}).then(r=>String(r.status)).catch(_=>'0')",
-              status->{if(!"\"200\"".equals(status))view.post(()->showWebError(content,view));});
+            view.evaluateJavascript("document.getElementById('workspace')?.hidden===false?'ready':document.getElementById('login-view')?.hidden===false?'login':'loading'",
+              status->{if("\"login\"".equals(status))view.postDelayed(()->checkWebSession(content,view),11000);});
           }
           @Override public void onReceivedError(WebView view,android.webkit.WebResourceRequest req,android.webkit.WebResourceError err){
             if(req.isForMainFrame())view.post(()->showWebError(content,view));
@@ -170,8 +172,13 @@ public final class CsrsDownloadsTabs {
       monitor.setBackground(round(c,0xff081426));item.setBackground(round(c,0xff21476a));
     });
   }
+  private static void checkWebSession(FrameLayout content,WebView web){
+    if(web.getParent()!=content||web.getVisibility()!=View.VISIBLE)return;
+    web.evaluateJavascript("document.getElementById('workspace')?.hidden===false?'ready':'pending'",
+      state->{if("\"pending\"".equals(state))web.post(()->showWebError(content,web));});
+  }
   private static void showWebError(FrameLayout content,WebView web){
-    if(web.getParent()!=content)return;
+    if(web.getParent()!=content||web.getVisibility()!=View.VISIBLE)return;
     LinearLayout panel=new LinearLayout(content.getContext());panel.setGravity(Gravity.CENTER);
     panel.setOrientation(LinearLayout.VERTICAL);panel.setPadding(28,28,28,28);
     panel.setBackgroundColor(0xff071523);
@@ -181,13 +188,19 @@ public final class CsrsDownloadsTabs {
     TextView retry=new TextView(content.getContext());retry.setText("REINTENTAR");
     retry.setTextSize(14);retry.setTextColor(0xff5ee2da);retry.setGravity(Gravity.CENTER);
     retry.setPadding(28,26,28,26);panel.addView(retry);
+    if(errorPanel!=null&&errorPanel.getParent()==content)content.removeView(errorPanel);
+    errorPanel=panel;
     content.addView(panel,new FrameLayout.LayoutParams(-1,-1));
-    retry.setOnClickListener(v->{content.removeView(panel);web.reload();});
+    retry.setOnClickListener(v->{content.removeView(panel);errorPanel=null;web.reload();});
   }
   public static void showMonitor(){
+    if(errorPanel!=null){
+      if(errorPanel.getParent() instanceof android.view.ViewGroup)
+        ((android.view.ViewGroup)errorPanel.getParent()).removeView(errorPanel);
+      errorPanel=null;
+    }
     if(overlay!=null)overlay.setVisibility(View.GONE);
     if(button!=null)button.setBackground(round(button.getContext(),0xff152940));
     if(monitorView!=null)monitorView.setBackground(round(monitorView.getContext(),0xff152940));
   }
 }
-

@@ -35,6 +35,17 @@ public final class CsrsMapControls {
         if (frame != null && mapView != null) new CsrsMapControls(frame, mapView);
     }
 
+    /** Initial camera only; subsequent unit selection uses the native map logic. */
+    public static void centerEcuador(Object nativeMap) {
+        if (nativeMap == null) return;
+        try {
+            nativeMap.getClass().getMethod("setMapCenter", double.class, double.class, float.class)
+                .invoke(nativeMap, -1.8312d, -78.1834d, 6.0f);
+        } catch (Exception ex) {
+            android.util.Log.w("CsrsMap", "No se pudo centrar Ecuador", ex);
+        }
+    }
+
     private int dp(int size) {
         return (int) (size * originalFrame.getResources().getDisplayMetrics().density + 0.5f);
     }
@@ -143,4 +154,3 @@ public final class CsrsMapControls {
         dialog.show();
     }
 }
-
