@@ -58,8 +58,10 @@ public final class CsrsMapControls {
     private void addControls(FrameLayout parent, final boolean expanded) {
         LinearLayout bar = new LinearLayout(parent.getContext());
         bar.setOrientation(LinearLayout.VERTICAL);
-        TextView layers = button("◈", "Elegir capa del mapa");
-        TextView full = button(expanded ? "↙" : "⛶", expanded ? "Volver al mapa normal" : "Pantalla completa");
+        TextView layers = button("", "Elegir capa del mapa");
+        CsrsGlyph.attach(layers, 1);
+        TextView full = button("", expanded ? "Volver al mapa normal" : "Pantalla completa");
+        CsrsGlyph.attach(full, 2);
         LinearLayout.LayoutParams item = new LinearLayout.LayoutParams(dp(42), dp(42));
         item.bottomMargin = dp(7);
         bar.addView(layers, item);
@@ -97,7 +99,7 @@ public final class CsrsMapControls {
         } catch (Exception ignored) { }
         new AlertDialog.Builder(activity)
             .setTitle("Capa del mapa")
-            .setSingleChoiceItems(new String[]{"Calles", "Satélite con calles"}, selected,
+            .setSingleChoiceItems(new String[]{"Calles", "Sat\u00e9lite con calles"}, selected,
                 new DialogInterface.OnClickListener() {
                     @Override public void onClick(DialogInterface popup, int which) {
                         try {
