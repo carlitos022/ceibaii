@@ -52,8 +52,8 @@ public final class CsrsUpdateManager implements Application.ActivityLifecycleCal
 
   private void showPrompt(Activity a){
     if(dialog!=null && dialog.isShowing())return;
-    dialog=new AlertDialog.Builder(a).setTitle("Actualización obligatoria")
-      .setMessage("Hay una nueva versión de CSRS X. Actualiza para continuar.")
+    dialog=new AlertDialog.Builder(a).setTitle("Actualizacion obligatoria")
+      .setMessage("Hay una nueva version de CSRS X. Actualiza para continuar.")
       .setCancelable(false)
       .setPositiveButton("Actualizar",(d,w)->download(a))
       .setNegativeButton("Cancelar",(d,w)->a.finishAffinity()).create();
@@ -67,7 +67,7 @@ public final class CsrsUpdateManager implements Application.ActivityLifecycleCal
     LinearLayout box=new LinearLayout(a);box.setOrientation(LinearLayout.VERTICAL);
     int pad=(int)(24*a.getResources().getDisplayMetrics().density);
     box.setPadding(pad,pad,pad,pad);box.addView(bar);
-    AlertDialog progress=new AlertDialog.Builder(a).setTitle("Descargando actualización")
+    AlertDialog progress=new AlertDialog.Builder(a).setTitle("Descargando actualizacion")
       .setView(box).setCancelable(false)
       .setNegativeButton("Cancelar",(d,w)->{downloading=false;showPrompt(a);}).create();
     progress.show();
@@ -99,7 +99,7 @@ public final class CsrsUpdateManager implements Application.ActivityLifecycleCal
         a.runOnUiThread(()->{progress.dismiss();downloading=false;showInstall(a);});
       }catch(Exception ex){
         temp.delete();a.runOnUiThread(()->{progress.dismiss();downloading=false;
-          if(!"Cancelado".equals(ex.getMessage()))new AlertDialog.Builder(a).setTitle("Error de actualización")
+          if(!"Cancelado".equals(ex.getMessage()))new AlertDialog.Builder(a).setTitle("Error de actualizacion")
             .setMessage(ex.getMessage()).setPositiveButton("Reintentar",(d,w)->download(a))
             .setNegativeButton("Salir",(d,w)->a.finishAffinity()).setCancelable(false).show();
         });
@@ -112,7 +112,7 @@ public final class CsrsUpdateManager implements Application.ActivityLifecycleCal
     PackageInfo incoming=pm.getPackageArchiveInfo(apk.getAbsolutePath(),PackageManager.GET_SIGNING_CERTIFICATES);
     PackageInfo current=pm.getPackageInfo(app.getPackageName(),PackageManager.GET_SIGNING_CERTIFICATES);
     if(incoming==null || !app.getPackageName().equals(incoming.packageName) || incoming.versionCode!=expected)
-      throw new IOException("Paquete o versión incorrectos");
+      throw new IOException("Paquete o version incorrectos");
     if(incoming.signingInfo==null || current.signingInfo==null)throw new IOException("Firma ausente");
     android.content.pm.Signature[] a=incoming.signingInfo.getApkContentsSigners();
     android.content.pm.Signature[] b=current.signingInfo.getApkContentsSigners();
@@ -121,8 +121,8 @@ public final class CsrsUpdateManager implements Application.ActivityLifecycleCal
   }
   private void install(Activity a){
     if(Build.VERSION.SDK_INT>=26 && !a.getPackageManager().canRequestPackageInstalls()){
-      new AlertDialog.Builder(a).setTitle("Permitir instalación")
-        .setMessage("Android debe autorizar a CSRS X a instalar esta actualización. Al regresar, pulsa Instalar ahora.")
+      new AlertDialog.Builder(a).setTitle("Permitir instalacion")
+        .setMessage("Android debe autorizar a CSRS X a instalar esta actualizacion. Al regresar, pulsa Instalar ahora.")
         .setPositiveButton("Abrir ajustes",(d,w)->{
           Intent i=new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
             Uri.parse("package:"+app.getPackageName()));a.startActivity(i);
@@ -137,8 +137,8 @@ public final class CsrsUpdateManager implements Application.ActivityLifecycleCal
   }
   private void showInstall(Activity a){
     if(dialog!=null)dialog.dismiss();
-    dialog=new AlertDialog.Builder(a).setTitle("Actualización descargada")
-      .setMessage("El archivo está listo. Android solicitará confirmar la instalación.")
+    dialog=new AlertDialog.Builder(a).setTitle("Actualizacion descargada")
+      .setMessage("El archivo esta listo. Android solicitara confirmar la instalacion.")
       .setPositiveButton("Instalar ahora",(d,w)->install(a))
       .setNegativeButton("Cancelar",(d,w)->a.finishAffinity()).setCancelable(false).create();
     dialog.show();

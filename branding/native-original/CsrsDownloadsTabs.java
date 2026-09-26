@@ -62,9 +62,21 @@ public final class CsrsDownloadsTabs {
     }
     if(bar.getTag()!=null)return;
     bar.setTag("csrs-tabs");
-    bar.setPadding(dp(c,12),dp(c,3),dp(c,12),dp(c,3));
+    bar.setPadding(dp(c,10),dp(c,5),dp(c,10),dp(c,5));
+    android.view.ViewGroup.LayoutParams nav=bar.getLayoutParams();
+    nav.height=dp(c,68);bar.setLayoutParams(nav);
+    android.widget.TextView monitorLabel=root.findViewById(id(c,"tab_realtime_tv"));
+    if(monitorLabel!=null){
+      monitorLabel.setText("Monitor");monitorLabel.setTextSize(13);
+      monitorLabel.setSingleLine(true);monitorLabel.setGravity(Gravity.CENTER);
+      monitorLabel.setIncludeFontPadding(false);monitorLabel.setPadding(0,dp(c,5),0,dp(c,5));
+      monitorLabel.setLayoutParams(new android.widget.RelativeLayout.LayoutParams(-1,-1));
+      CsrsGlyph.attachWithLabel(monitorLabel,4,26);
+    }
     bar.setBackgroundColor(0xff081426);
     monitor.setBackground(round(c,0xff152940));
+    monitor.setForeground(new android.graphics.drawable.RippleDrawable(
+      android.content.res.ColorStateList.valueOf(0x4461e1df),null,null));
     String account=currentUser();
     if(account==null||!"admin".equalsIgnoreCase(account))return;
     String password=account.equalsIgnoreCase(pendingUser)?pendingPassword:savedPassword(account);
@@ -104,14 +116,18 @@ public final class CsrsDownloadsTabs {
     Context c=root.getContext();
     LinearLayout item=new LinearLayout(c);item.setOrientation(LinearLayout.VERTICAL);
     item.setGravity(Gravity.CENTER);item.setBackground(round(c,0xff152940));
+    item.setMinimumHeight(dp(c,56));item.setContentDescription("Abrir Descargas");
+    item.setForeground(new android.graphics.drawable.RippleDrawable(
+      android.content.res.ColorStateList.valueOf(0x4461e1df),null,null));
     TextView icon=new TextView(c);icon.setGravity(Gravity.CENTER);
-    CsrsGlyph.attach(icon,3);
-    item.addView(icon,new LinearLayout.LayoutParams(dp(c,28),dp(c,25)));
+    CsrsGlyph.attach(icon,3,26);
+    item.addView(icon,new LinearLayout.LayoutParams(dp(c,40),dp(c,30)));
     TextView caption=new TextView(c);caption.setText("Descargas");caption.setTextSize(11);
     caption.setTextColor(0xff83ddeb);caption.setGravity(Gravity.CENTER);
-    item.addView(caption,new LinearLayout.LayoutParams(-1,dp(c,20)));
+    caption.setTextSize(13);caption.setSingleLine(true);caption.setIncludeFontPadding(false);
+    item.addView(caption,new LinearLayout.LayoutParams(-1,dp(c,24)));
     LinearLayout.LayoutParams pos=new LinearLayout.LayoutParams(0,-1,1);
-    pos.leftMargin=dp(c,10);bar.addView(item,pos);
+    pos.leftMargin=dp(c,8);bar.addView(item,pos);
     button=item;monitorView=monitor;
     item.setOnClickListener(v->{
       if(overlay==null||overlay.getParent()!=content){
@@ -126,7 +142,14 @@ public final class CsrsDownloadsTabs {
         android.webkit.CookieManager.getInstance().setAcceptThirdPartyCookies(web,false);
         web.setWebViewClient(new WebViewClient(){
           @Override public void onPageFinished(WebView view,String url){
-            view.evaluateJavascript("document.getElementById('login-view')?.remove()",null);
+            // Keep the login node: the existing script uses it during /api/auth/verify.
+            view.evaluateJavascript(
+              "var x=document.getElementById('login-view');if(x){x.style.display='none';}",null);
+            view.evaluateJavascript("fetch('/api/auth/verify',{credentials:'same-origin'}).then(r=>String(r.status)).catch(_=>'0')",
+              status->{if(!"\"200\"".equals(status))view.post(()->showWebError(content,view));});
+          }
+          @Override public void onReceivedError(WebView view,android.webkit.WebResourceRequest req,android.webkit.WebResourceError err){
+            if(req.isForMainFrame())view.post(()->showWebError(content,view));
           }
         });
         web.setDownloadListener((link,agent,disposition,mime,length)->{
@@ -146,6 +169,20 @@ public final class CsrsDownloadsTabs {
       }else overlay.setVisibility(View.VISIBLE);
       monitor.setBackground(round(c,0xff081426));item.setBackground(round(c,0xff21476a));
     });
+  }
+  private static void showWebError(FrameLayout content,WebView web){
+    if(web.getParent()!=content)return;
+    LinearLayout panel=new LinearLayout(content.getContext());panel.setGravity(Gravity.CENTER);
+    panel.setOrientation(LinearLayout.VERTICAL);panel.setPadding(28,28,28,28);
+    panel.setBackgroundColor(0xff071523);
+    TextView msg=new TextView(content.getContext());msg.setText("No se pudo abrir Descargas");
+    msg.setTextSize(18);msg.setTextColor(0xffffffff);msg.setGravity(Gravity.CENTER);
+    panel.addView(msg);
+    TextView retry=new TextView(content.getContext());retry.setText("REINTENTAR");
+    retry.setTextSize(14);retry.setTextColor(0xff5ee2da);retry.setGravity(Gravity.CENTER);
+    retry.setPadding(28,26,28,26);panel.addView(retry);
+    content.addView(panel,new FrameLayout.LayoutParams(-1,-1));
+    retry.setOnClickListener(v->{content.removeView(panel);web.reload();});
   }
   public static void showMonitor(){
     if(overlay!=null)overlay.setVisibility(View.GONE);

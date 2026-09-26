@@ -40,7 +40,7 @@ public final class CsrsMapControls {
     }
 
     private TextView button(String label, String description) {
-        TextView button = new TextView(originalFrame.getContext());
+        TextView button = new CsrsIconView(originalFrame.getContext());
         button.setText(label);
         button.setContentDescription(description);
         button.setTextSize(19);
@@ -51,6 +51,8 @@ public final class CsrsMapControls {
         bg.setCornerRadius(dp(10));
         bg.setStroke(dp(1), 0x9948C7ED);
         button.setBackground(bg);
+        button.setForeground(new android.graphics.drawable.RippleDrawable(
+            android.content.res.ColorStateList.valueOf(0x4483DDEB),null,null));
         button.setElevation(dp(3));
         return button;
     }
@@ -59,14 +61,14 @@ public final class CsrsMapControls {
         LinearLayout bar = new LinearLayout(parent.getContext());
         bar.setOrientation(LinearLayout.VERTICAL);
         TextView layers = button("", "Elegir capa del mapa");
-        CsrsGlyph.attach(layers, 1);
+        CsrsGlyph.attach(layers, 1, 27);
         TextView full = button("", expanded ? "Volver al mapa normal" : "Pantalla completa");
-        CsrsGlyph.attach(full, 2);
-        LinearLayout.LayoutParams item = new LinearLayout.LayoutParams(dp(42), dp(42));
-        item.bottomMargin = dp(7);
+        CsrsGlyph.attach(full, 2, 27);
+        LinearLayout.LayoutParams item = new LinearLayout.LayoutParams(dp(52), dp(52));
+        item.bottomMargin = dp(10);
         bar.addView(layers, item);
-        bar.addView(full, new LinearLayout.LayoutParams(dp(42), dp(42)));
-        FrameLayout.LayoutParams place = new FrameLayout.LayoutParams(dp(42), dp(91), Gravity.TOP | Gravity.RIGHT);
+        bar.addView(full, new LinearLayout.LayoutParams(dp(52), dp(52)));
+        FrameLayout.LayoutParams place = new FrameLayout.LayoutParams(dp(52), dp(116), Gravity.TOP | Gravity.RIGHT);
         place.topMargin = dp(14);
         place.rightMargin = dp(12);
         parent.addView(bar, place);
@@ -97,9 +99,9 @@ public final class CsrsMapControls {
             Method getType = google.getClass().getMethod("getMapType");
             selected = ((Integer) getType.invoke(google)).intValue() == 4 ? 1 : 0;
         } catch (Exception ignored) { }
-        new AlertDialog.Builder(activity)
+        AlertDialog popup = new AlertDialog.Builder(activity)
             .setTitle("Capa del mapa")
-            .setSingleChoiceItems(new String[]{"Calles", "Sat\u00e9lite con calles"}, selected,
+            .setSingleChoiceItems(new String[]{"Calles", "Satelite con calles"}, selected,
                 new DialogInterface.OnClickListener() {
                     @Override public void onClick(DialogInterface popup, int which) {
                         try {
@@ -110,7 +112,11 @@ public final class CsrsMapControls {
                         }
                         popup.dismiss();
                     }
-                }).setNegativeButton("Cancelar", null).show();
+                }).setNegativeButton("Cancelar", null).create();
+        popup.show();
+        Window w=popup.getWindow();
+        if(w!=null){int width=Math.min(activity.getResources().getDisplayMetrics().widthPixels-dp(36),dp(360));
+            w.setLayout(width,WindowManager.LayoutParams.WRAP_CONTENT);}
     }
 
     private void enterFullscreen() {

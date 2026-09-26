@@ -7,9 +7,21 @@ public final class CsrsGlyph extends Drawable {
   public CsrsGlyph(int t){type=t;}
   public static void attach(TextView v,int type){
     CsrsGlyph icon=new CsrsGlyph(type);
-    icon.setBounds(0,0,24,24);
+    int px=(int)(24*v.getResources().getDisplayMetrics().density+0.5f);
+    icon.setBounds(0,0,px,px);
     v.setText("");
     v.setCompoundDrawables(null,icon,null,null);
+  }
+  public static void attach(TextView v,int type,int size){
+    if(v instanceof CsrsIconView){((CsrsIconView)v).setIcon(type,size);return;}
+    int px=(int)(size*v.getResources().getDisplayMetrics().density+0.5f);
+    CsrsGlyph icon=new CsrsGlyph(type);icon.setBounds(0,0,px,px);
+    v.setText("");v.setCompoundDrawables(null,icon,null,null);
+  }
+  public static void attachWithLabel(TextView v,int type,int size){
+    int px=(int)(size*v.getResources().getDisplayMetrics().density+0.5f);
+    CsrsGlyph icon=new CsrsGlyph(type);icon.setBounds(0,0,px,px);
+    v.setCompoundDrawables(null,icon,null,null);v.setCompoundDrawablePadding((int)(3*v.getResources().getDisplayMetrics().density));
   }
   @Override public int getIntrinsicWidth(){return 24;}
   @Override public int getIntrinsicHeight(){return 24;}
@@ -29,6 +41,12 @@ public final class CsrsGlyph extends Drawable {
       c.drawLine(15,3,21,3,p);c.drawLine(21,3,21,9,p);
       c.drawLine(3,15,3,21,p);c.drawLine(3,21,9,21,p);
       c.drawLine(15,21,21,21,p);c.drawLine(21,15,21,21,p);
+    }else if(type==4){
+      p.setStyle(Paint.Style.FILL);c.drawCircle(12,9,6.5f,p);
+      p.setColor(0xff152940);c.drawCircle(12,9,2.6f,p);
+      p.setColor(Color.WHITE);
+      Path pin=new Path();pin.moveTo(5.5f,12);pin.lineTo(12,22);
+      pin.lineTo(18.5f,12);pin.close();c.drawPath(pin,p);
     }else{
       c.drawLine(12,3,12,16,p);
       c.drawLine(7,11,12,16,p);c.drawLine(12,16,17,11,p);
