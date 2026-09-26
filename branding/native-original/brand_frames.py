@@ -35,9 +35,9 @@ def symbol(size, progress):
     dots = [(round(x*scale), round(y*scale)) for x,y in path]
     width = round(80*scale)
     base = (2, 154, 229, 225)
-    draw.line(dots, fill=base, width=width, joint="curve")
-    for x,y in (dots[0], dots[-1]):
-        draw.ellipse((x-width//2,y-width//2,x+width//2,y+width//2),fill=base)
+    # La curva empieza vacia, como stroke-dasharray del SVG web.
+    # Evitar dibujar dos capas completas sobre el mismo fotograma.
+
     count = max(2, round(len(dots)*progress))
     shine = ImageDraw.Draw(glow)
     trace = dots[:count]
@@ -77,10 +77,10 @@ for number in range(steps):
     login_name = f"csrs_login_frame_{number:02d}"
     splash_names.append(splash_name)
     login_names.append(login_name)
-    overlay(splash_base, symbol(400,progress),540,787).convert("RGB").resize(
+    overlay(splash_base, symbol(320,progress),540,787).convert("RGB").resize(
         (540,960),Image.Resampling.LANCZOS).save(
         root / "drawable-nodpi" / (splash_name+".png"), optimize=True)
-    overlay(login_base, symbol(300,progress),450,82).save(
+    overlay(login_base, symbol(300,1.0),450,82).save(
         root / "drawable-xxhdpi" / (login_name+".png"), optimize=True)
 
 (root / "drawable-nodpi" / "csrs_splash_anim.xml").write_text(animation_xml(splash_names), encoding="utf-8")
