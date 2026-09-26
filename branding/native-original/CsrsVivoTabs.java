@@ -141,17 +141,10 @@ public final class CsrsVivoTabs {
             installed=true;
             String script="localStorage.setItem('csrs_auth',"+JSONObject.quote(authJson)+");location.replace('"+PAGE+"&ready=1')";
             view.evaluateJavascript(script,null);
-          }else{
-            String verify="fetch('/api/auth/verify',{headers:{Authorization:'Bearer '+JSON.parse(localStorage.getItem('csrs_auth')).token}}).then(r=>String(r.status)).catch(()=> '0')";
-            view.evaluateJavascript(verify,s->{
-              if(holder==null||holder.getVisibility()!=View.VISIBLE)return;
-              if("\"200\"".equals(s)){
-                for(int i=holder.getChildCount()-1;i>=0;i--)
-                  if(holder.getChildAt(i)!=view)holder.removeViewAt(i);
-                view.setVisibility(View.VISIBLE);
-              }
-              else error(root,"No se pudo verificar la sesion de Vivo");
-            });
+          }else if(url.contains("ready=1")&&holder!=null&&holder.getVisibility()==View.VISIBLE){
+            for(int i=holder.getChildCount()-1;i>=0;i--)
+              if(holder.getChildAt(i)!=view)holder.removeViewAt(i);
+            view.setVisibility(View.VISIBLE);
           }
         }
         @Override public void onReceivedError(WebView view,android.webkit.WebResourceRequest req,android.webkit.WebResourceError err){
@@ -211,6 +204,11 @@ public final class CsrsVivoTabs {
         if(response.optInt("code")!=200||!response.optBoolean("result")||response.optString("token").isEmpty())throw new Exception("auth denied");
         JSONObject user=response.getJSONObject("user");
         if(!username.equalsIgnoreCase(user.optString("account")))throw new Exception("account mismatch");
+        HttpURLConnection verify=(HttpURLConnection)new URL(ORIGIN+"api/auth/verify").openConnection();
+        verify.setRequestMethod("GET");verify.setConnectTimeout(8000);verify.setReadTimeout(8000);
+        verify.setRequestProperty("Authorization","Bearer "+response.getString("token"));
+        int status=verify.getResponseCode();verify.disconnect();
+        if(status!=200)throw new Exception("token verification failed");
         String session=new JSONObject().put("token",response.getString("token")).put("user",user).toString();
         root.post(()->{authJson=session;pendingPassword=null;if(web!=null&&holder!=null&&holder.getVisibility()==View.VISIBLE){installed=false;web.loadUrl(PAGE);}});
       }catch(Exception ex){root.post(()->error(root,"No se pudo abrir Vivo con esta cuenta"));}
