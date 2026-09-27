@@ -105,7 +105,18 @@ public final class CsrsVivoTabs {
     tab.setOnClickListener(v->open(root));
     bar.getViewTreeObserver().addOnGlobalLayoutListener(()->linkDownloads(bar));
     linkDownloads(bar);
-    root.post(()->{if(currentUser()!=null)open(root);});
+    root.post(()->{hideLegacyFleet(root);if(currentUser()!=null)open(root);});
+  }
+  public static boolean isLegacyFleetHidden(){
+    return item!=null && item.getParent()!=null && currentUser()!=null;
+  }
+  private static void hideLegacyFleet(View root){
+    View drawer=root.getRootView().findViewById(id(root.getContext(),"drawer_layout"));
+    if(drawer==null||!"androidx.drawerlayout.widget.DrawerLayout".equals(drawer.getClass().getName()))return;
+    try {
+      drawer.getClass().getMethod("setDrawerLockMode",int.class).invoke(drawer,1);
+      drawer.getClass().getMethod("closeDrawers").invoke(drawer);
+    }catch(Exception ignored){}
   }
   private static void linkDownloads(LinearLayout bar){
     for(int i=0;i<bar.getChildCount();i++){
