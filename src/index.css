@@ -131,3 +131,50 @@
   background-image: radial-gradient(rgba(0, 209, 255, 0.15) 1px, transparent 1px);
   background-size: 24px 24px;
 }
+
+/* Compatible colors for older Android WebView; preserves the original Tailwind palette. */
+@theme {
+  --color-red-300: #ffa2a2;
+  --color-red-400: #ff6467;
+  --color-red-500: #fb2c36;
+  --color-red-700: #c10007;
+  --color-red-800: #9f0712;
+  --color-red-900: #82181a;
+  --color-red-950: #460809;
+  --color-orange-300: #ffb86a;
+  --color-orange-400: #ff8904;
+  --color-orange-700: #ca3500;
+  --color-orange-800: #9f2d00;
+  --color-orange-900: #7e2a0c;
+  --color-orange-950: #441306;
+  --color-amber-300: #ffd230;
+  --color-amber-400: #ffb900;
+  --color-amber-500: #fe9a00;
+  --color-amber-700: #bb4d00;
+  --color-amber-900: #7b3306;
+  --color-amber-950: #461901;
+  --color-emerald-300: #5ee9b5;
+  --color-emerald-400: #00d492;
+  --color-emerald-500: #00bc7d;
+  --color-emerald-600: #009966;
+  --color-emerald-700: #007a55;
+  --color-emerald-800: #006045;
+  --color-emerald-900: #004f3b;
+  --color-emerald-950: #002c22;
+  --color-cyan-100: #cefafe;
+  --color-cyan-200: #a2f4fd;
+  --color-cyan-800: #005f78;
+  --color-sky-400: #00bcff;
+  --color-sky-700: #0069a8;
+  --color-sky-900: #024a70;
+  --color-slate-100: #f1f5f9;
+  --color-slate-200: #e2e8f0;
+  --color-slate-300: #cad5e2;
+  --color-slate-400: #90a1b9;
+  --color-slate-500: #62748e;
+  --color-slate-600: #45556c;
+  --color-slate-700: #314158;
+  --color-slate-800: #1d293d;
+  --color-slate-900: #0f172b;
+  --color-slate-950: #020618;
+}
