@@ -15,7 +15,7 @@ import { EvidenceTrackerView } from './components/EvidenceTrackerView';
 import { SettingsModal } from './components/SettingsModal';
 import { VideoPreviewModal } from './components/VideoPreviewModal';
 import { VueltasView } from './components/VueltasView';
-import { User, Lock, ArrowRight } from 'lucide-react';
+import { User, Lock, ArrowRight, Monitor, Download } from 'lucide-react';
 
 interface AuthState {
   user: any;
@@ -23,7 +23,10 @@ interface AuthState {
 }
 
 export default function App() {
-  const embeddedVivo = new URLSearchParams(window.location.search).get('embed') === 'vivo';
+  const query = new URLSearchParams(window.location.search);
+  const embeddedVivo = query.get('embed') === 'vivo';
+  const androidApp = query.get('app') === 'android';
+  const embeddedShell = embeddedVivo || androidApp;
   // Primary States
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [selectedVehicle, setSelectedVehicle] = useState<Vehicle | null>(null);
@@ -42,7 +45,7 @@ export default function App() {
 
   // Auth States
   const [auth, setAuth] = useState<AuthState>({ user: null, token: null });
-  const [showSplash, setShowSplash] = useState(!embeddedVivo);
+  const [showSplash, setShowSplash] = useState(!embeddedShell);
   const [showLogin, setShowLogin] = useState(false);
   const [loginError, setLoginError] = useState('');
   const [isLoggingIn, setIsLoggingIn] = useState(false);
@@ -76,7 +79,7 @@ export default function App() {
 
   // Splash screen
   useEffect(() => {
-    if (embeddedVivo) {
+    if (embeddedShell) {
       setShowSplash(false);
       setShowLogin(!auth.token);
       return;
@@ -86,7 +89,7 @@ export default function App() {
       setShowLogin(!auth.token);
     }, 2000);
     return () => clearTimeout(timer);
-  }, [auth.token, embeddedVivo]);
+  }, [auth.token, embeddedShell]);
 
   // Helpers to normalize API responses (handles both new mock API and old Ceiba 12058 API wrapped in {code,result})
   const normalizeArray = <T,>(data: any, fallback: T[]): T[] => {
@@ -117,10 +120,10 @@ export default function App() {
     try {
       const [vehRaw, geoRaw, altRaw, libRaw, dlRaw] = await Promise.all([
         safeFetch('/api/vehicles', null),
-        embeddedVivo ? Promise.resolve(null) : safeFetch('/api/geofences', null),
-        embeddedVivo ? Promise.resolve(null) : safeFetch('/api/alerts', null),
-        embeddedVivo ? Promise.resolve(null) : safeFetch('/api/library', null),
-        embeddedVivo ? Promise.resolve(null) : safeFetch('/api/downloads', null)
+        embeddedShell ? Promise.resolve(null) : safeFetch('/api/geofences', null),
+        embeddedShell ? Promise.resolve(null) : safeFetch('/api/alerts', null),
+        embeddedShell ? Promise.resolve(null) : safeFetch('/api/library', null),
+        embeddedShell ? Promise.resolve(null) : safeFetch('/api/downloads', null)
       ]);
 
       const vehData = vehRaw ? normalizeVehicles(vehRaw) : [];
@@ -147,7 +150,7 @@ export default function App() {
       setLibrary([]);
       setDownloads([]);
     }
-  }, [embeddedVivo]);
+  }, [embeddedShell]);
 
   useEffect(() => {
     if (!auth.token || showSplash) return;
@@ -525,7 +528,7 @@ export default function App() {
         onOpenVideo={handleOpenVideo}
       />
 
-      {embeddedVivo && activeTab !== 'vivo' && (
+      {embeddedShell && activeTab !== 'vivo' && activeTab !== 'descargas' && (
         <button type="button" onClick={() => setActiveTab('vivo')}
           className="px-4 py-2 text-sm font-semibold text-cyan-200 bg-[#08283d] border-b border-cyan-800">
           Volver a Vivo
@@ -533,7 +536,7 @@ export default function App() {
       )}
 
       {/* Main View Area */}
-      <main className="relative flex-1 w-full h-full overflow-hidden bg-[radial-gradient(circle_at_top,rgba(0,209,255,0.06),transparent_32%)]">
+      <main className={`relative flex-1 w-full h-full overflow-hidden bg-[radial-gradient(circle_at_top,rgba(0,209,255,0.06),transparent_32%)] ${androidApp ? 'pb-16' : ''}`}>
         {/* Tab 1: Live Interactive Map (Vivo) - En Vivo MDVR con contadores reales + barra lateral unidades */}
         <div className={`w-full h-full ${activeTab === 'vivo' ? 'flex flex-col' : 'hidden'}`}>
           {/* Live stats bar tiempo real */}
@@ -640,12 +643,26 @@ export default function App() {
         onLogout={handleLogout}
       />
 
-      {/* Bottom 5-Tab Navigation Bar */}
-      {!embeddedVivo && <BottomNavBar
+      {/* Full web keeps its navigation; Android shell deliberately exposes only Vivo + Descargas. */}
+      {!embeddedShell && <BottomNavBar
         activeTab={activeTab}
         onTabChange={(tab) => setActiveTab(tab)}
         unreadAlertsCount={unreadAlertsCount}
       />}
+      {androidApp && (
+        <nav className="fixed bottom-0 left-0 right-0 h-16 z-50 grid grid-cols-2 bg-[#000f20]/98 border-t border-[#293a50] shadow-[0_-8px_24px_rgba(0,0,0,0.45)]">
+          <button type="button" onClick={() => setActiveTab('vivo')}
+            className={`flex flex-col items-center justify-center gap-1 ${activeTab === 'vivo' ? 'text-[#00d1ff]' : 'text-slate-400'}`}>
+            <Monitor className="w-5 h-5" />
+            <span className="text-[11px] font-semibold">Vivo</span>
+          </button>
+          <button type="button" onClick={() => setActiveTab('descargas')}
+            className={`flex flex-col items-center justify-center gap-1 ${activeTab === 'descargas' ? 'text-[#00d1ff]' : 'text-slate-400'}`}>
+            <Download className="w-5 h-5" />
+            <span className="text-[11px] font-semibold">Descargas</span>
+          </button>
+        </nav>
+      )}
     </div>
   );
 }

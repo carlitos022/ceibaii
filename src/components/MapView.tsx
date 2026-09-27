@@ -322,7 +322,8 @@ export const MapView: React.FC<MapViewProps> = ({
   const toggleFullscreen = () => {
     const root = mapRootRef.current;
     if (!root) return;
-    const nativeBridge = new URLSearchParams(window.location.search).get('embed') === 'vivo'
+    const params = new URLSearchParams(window.location.search);
+    const nativeBridge = (params.get('embed') === 'vivo' || params.get('app') === 'android')
       ? (window as Window & { CSRSVivoNative?: { setMapFullscreen: (expand: boolean) => void } }).CSRSVivoNative
       : undefined;
     if (isFullscreen) {
