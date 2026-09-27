@@ -3,6 +3,21 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <style>html.csrs-embed-loading #root { visibility: hidden; }</style>
+    <script>
+      if (new URLSearchParams(location.search).get('embed') === 'vivo') {
+        document.documentElement.classList.add('csrs-embed-loading');
+        document.addEventListener('DOMContentLoaded', () => {
+          const css = document.querySelector('link[rel="stylesheet"][href*="/assets/index-"]');
+          const reveal = () => document.documentElement.classList.remove('csrs-embed-loading');
+          if (!css || css.sheet) reveal();
+          else {
+            css.addEventListener('load', reveal, { once: true });
+            css.addEventListener('error', reveal, { once: true });
+          }
+        });
+      }
+    </script>
     <title>CustomServiciosRS - Monitoreo de Flotas Ceiba II</title>
     <meta name="description" content="Dashboard de Monitoreo de Flotas y Telemetría Ceiba II" />
     <link rel="preconnect" href="https://fonts.googleapis.com">
