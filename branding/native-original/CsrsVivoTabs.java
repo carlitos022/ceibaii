@@ -33,6 +33,7 @@ public final class CsrsVivoTabs {
   private static WebView web;
   private static String authJson;
   private static boolean loading,installed;
+  private static android.app.Dialog fullscreenDialog;
   private CsrsVivoTabs(){}
 
   public static void capture(Object user){
@@ -81,6 +82,7 @@ public final class CsrsVivoTabs {
     if(bar==null||body==null||nativeMonitor==null||currentUser()==null)return;
     if(bar.findViewWithTag("csrs-vivo")!=null)return;
     content=body;monitor=nativeMonitor;
+    nativeMonitor.setVisibility(View.GONE);
     LinearLayout tab=new LinearLayout(c);tab.setTag("csrs-vivo");
     tab.setOrientation(LinearLayout.VERTICAL);tab.setGravity(Gravity.CENTER);
     tab.setBackground(background(c,0xff152940));tab.setContentDescription("Abrir Vivo");
@@ -97,6 +99,7 @@ public final class CsrsVivoTabs {
     tab.setOnClickListener(v->open(root));
     bar.getViewTreeObserver().addOnGlobalLayoutListener(()->linkDownloads(bar));
     linkDownloads(bar);
+    root.post(()->{if(currentUser()!=null)open(root);});
   }
   private static void linkDownloads(LinearLayout bar){
     for(int i=0;i<bar.getChildCount();i++){
@@ -134,6 +137,7 @@ public final class CsrsVivoTabs {
       web.getSettings().setAllowFileAccess(false);
       web.getSettings().setAllowContentAccess(false);
       web.getSettings().setMediaPlaybackRequiresUserGesture(false);
+      web.addJavascriptInterface(new NativeBridge(),"CSRSVivoNative");
       web.setWebViewClient(new WebViewClient(){
         @Override public void onPageFinished(WebView view,String url){
           if(!url.startsWith(ORIGIN)||authJson==null)return;
@@ -156,7 +160,7 @@ public final class CsrsVivoTabs {
       startAuth(root);
     }else{
       holder.setVisibility(View.VISIBLE);
-      if(web!=null&&web.getVisibility()!=View.VISIBLE&&authJson!=null)web.reload();
+      if(web!=null&&authJson!=null)web.reload();
     }
     holder.bringToFront();monitor.setBackground(background(c,0xff081426));item.setBackground(background(c,0xff21476a));
   }
@@ -165,8 +169,19 @@ public final class CsrsVivoTabs {
     label.setTextSize(17);label.setGravity(Gravity.CENTER);return label;
   }
   private static void loading(View root){
-    TextView label=message(root.getContext(),"Cargando Vivo...");
-    holder.addView(label,new FrameLayout.LayoutParams(-1,-1));
+    Context c=root.getContext();
+    LinearLayout panel=new LinearLayout(c);panel.setGravity(Gravity.CENTER);
+    panel.setOrientation(LinearLayout.VERTICAL);
+    android.widget.ProgressBar spinner=new android.widget.ProgressBar(c);
+    spinner.setIndeterminateTintList(android.content.res.ColorStateList.valueOf(0xff5ee2da));
+    panel.addView(spinner,new LinearLayout.LayoutParams(dp(c,34),dp(c,34)));
+    TextView title=message(c,"Abriendo Vivo");title.setTextSize(17);
+    LinearLayout.LayoutParams titlePos=new LinearLayout.LayoutParams(-1,dp(c,36));
+    titlePos.topMargin=dp(c,14);panel.addView(title,titlePos);
+    TextView detail=message(c,"Preparando mapa y unidades");
+    detail.setTextSize(12);detail.setTextColor(0xff92adba);
+    panel.addView(detail,new LinearLayout.LayoutParams(-1,dp(c,26)));
+    holder.addView(panel,new FrameLayout.LayoutParams(-1,-1));
   }
   private static void error(View root,String message){
     if(holder==null||holder.getVisibility()!=View.VISIBLE)return;
@@ -216,9 +231,52 @@ public final class CsrsVivoTabs {
     }).start();
   }
   public static void showMonitor(){
+    setNativeFullscreen(false);
     if(holder!=null)holder.setVisibility(View.GONE);
     if(item!=null)item.setBackground(background(item.getContext(),0xff152940));
     if(monitor!=null)monitor.setBackground(background(monitor.getContext(),0xff152940));
+  }
+  private static void setNativeFullscreen(boolean expand){
+    if(!expand){if(fullscreenDialog!=null)fullscreenDialog.dismiss();return;}
+    if(fullscreenDialog!=null||web==null||holder==null||web.getParent()!=holder)return;
+    final WebView current=web;
+    final FrameLayout original=holder;
+    original.removeView(current);
+    final FrameLayout frame=new FrameLayout(current.getContext());
+    frame.setBackgroundColor(0xff071523);
+    frame.addView(current,new FrameLayout.LayoutParams(-1,-1));
+    final android.app.Dialog dialog=new android.app.Dialog(current.getContext(),android.R.style.Theme_NoTitleBar_Fullscreen);
+    dialog.setContentView(frame);
+    dialog.setOnDismissListener(ignored->{
+      frame.removeView(current);
+      if(original.getParent()!=null&&current.getParent()==null)
+        original.addView(current,0,new FrameLayout.LayoutParams(-1,-1));
+      if(fullscreenDialog==dialog)fullscreenDialog=null;
+      current.evaluateJavascript("window.dispatchEvent(new Event('csrs-native-fullscreen-exit'))",null);
+      current.postDelayed(()->current.evaluateJavascript("window.dispatchEvent(new Event('resize'))",null),100);
+    });
+    try{
+      dialog.show();fullscreenDialog=dialog;
+      android.view.Window window=dialog.getWindow();
+      if(window!=null){
+        window.setLayout(-1,-1);
+        window.addFlags(android.view.WindowManager.LayoutParams.FLAG_FULLSCREEN);
+        window.getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+          |View.SYSTEM_UI_FLAG_HIDE_NAVIGATION|View.SYSTEM_UI_FLAG_FULLSCREEN);
+      }
+      current.postDelayed(()->current.evaluateJavascript("window.dispatchEvent(new Event('resize'))",null),100);
+    }catch(RuntimeException ex){
+      dialog.setOnDismissListener(null);
+      frame.removeView(current);
+      if(current.getParent()==null)original.addView(current,0,new FrameLayout.LayoutParams(-1,-1));
+      fullscreenDialog=null;
+    }
+  }
+  private static final class NativeBridge {
+    @android.webkit.JavascriptInterface public void setMapFullscreen(boolean expand){
+      WebView current=web;
+      if(current!=null)current.post(()->setNativeFullscreen(expand));
+    }
   }
   private static final class Eye extends View {
     private final Paint paint=new Paint(3);
