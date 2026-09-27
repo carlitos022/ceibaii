@@ -40,10 +40,11 @@ Nueva linea independiente iniciada el 2026-09-27.
 
 ## Fuentes
 - Clean v1: branding/native-clean-v1
-- Web Android mode: ceiba2-web commit 94bd04a
+- Web Android mode (GitHub main): commit 9bff0ed2249addb1b994aa6cdecfc288c73fc641
 - v15 fleet tag: v15-stable-20260926
 - v15 web tag: v15-web-stable-20260926
 
 ## Salida
 - APK publicada: C:\customserviciosrs\ceiba-fleet\dist\downloads\CSRS-X-Clean-v1.apk
 - URL: http://209.126.77.129:3010/downloads/CSRS-X-Clean-v1.apk
+- SHA-256 APK final: DDA908CC29D51F1D11D9CCC12CCD768A166DAE30B5C591A3E016E2AD6829F697
