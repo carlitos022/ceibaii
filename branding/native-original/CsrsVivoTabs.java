@@ -83,6 +83,12 @@ public final class CsrsVivoTabs {
     if(bar.findViewWithTag("csrs-vivo")!=null)return;
     content=body;monitor=nativeMonitor;
     nativeMonitor.setVisibility(View.GONE);
+    // Hide every legacy native tab regardless of the resource names in this CEIBA II build.
+    for(int i=0;i<bar.getChildCount();i++){
+      View child=bar.getChildAt(i);
+      if(child!=nativeMonitor && !(child instanceof ViewGroup && hasDownloads((ViewGroup)child)))
+        child.setVisibility(View.GONE);
+    }
     LinearLayout tab=new LinearLayout(c);tab.setTag("csrs-vivo");
     tab.setOrientation(LinearLayout.VERTICAL);tab.setGravity(Gravity.CENTER);
     tab.setBackground(background(c,0xff152940));tab.setContentDescription("Abrir Vivo");
@@ -108,6 +114,8 @@ public final class CsrsVivoTabs {
       if(child instanceof ViewGroup && hasDownloads((ViewGroup)child)){
         child.setTag("csrs-vivo-linked");
         child.setOnTouchListener((v,e)->{if(e.getAction()==MotionEvent.ACTION_DOWN)showMonitor();return false;});
+      }else if(child.getVisibility()!=View.GONE){
+        child.setVisibility(View.GONE);
       }
     }
   }
