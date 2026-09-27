@@ -50,13 +50,10 @@ export const MapView: React.FC<MapViewProps> = ({
   useEffect(() => {
     if (!mapContainerRef.current || mapInstanceRef.current) return;
 
-    const firstLocated = vehicles.find(v => v.lat !== null && v.lng !== null);
-    const centerLat = selectedVehicle?.lat ?? firstLocated?.lat ?? -3.9928;
-    const centerLng = selectedVehicle?.lng ?? firstLocated?.lng ?? -79.2845;
-
+    // Show Ecuador on first open; choosing a unit still moves the map to its GPS position.
     const map = L.map(mapContainerRef.current, {
-      center: [centerLat, centerLng],
-      zoom: 13,
+      center: [-1.65, -78.4],
+      zoom: 6,
       zoomControl: false,
       attributionControl: false
     });
