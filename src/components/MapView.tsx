@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Vehicle, Geofence } from '../types';
-import { Maximize, Minimize, Layers, Map as MapIcon, Globe, Target } from 'lucide-react';
+import { Map as MapIcon, Globe, Target } from 'lucide-react';
 import L from 'leaflet';
 
 interface MapViewProps {
@@ -18,6 +18,7 @@ export const MapView: React.FC<MapViewProps> = ({
   onSelectVehicle,
   onMapClick
 }) => {
+  const mapRootRef = useRef<HTMLDivElement>(null);
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<L.Map | null>(null);
   const markersRef = useRef<{ [key: string]: L.Marker }>({});
@@ -322,14 +323,39 @@ export const MapView: React.FC<MapViewProps> = ({
   }, [selectedVehicle?.id, selectedVehicle?.lat, selectedVehicle?.lng]);
 
   const toggleFullscreen = () => {
-    if (!document.fullscreenElement) {
-      document.documentElement.requestFullscreen().catch(() => {});
-      setIsFullscreen(true);
-    } else {
-      document.exitFullscreen().catch(() => {});
+    const root = mapRootRef.current;
+    if (!root) return;
+    const nativeBridge = new URLSearchParams(window.location.search).get('embed') === 'vivo'
+      ? (window as Window & { CSRSVivoNative?: { setMapFullscreen: (expand: boolean) => void } }).CSRSVivoNative
+      : undefined;
+    if (isFullscreen) {
       setIsFullscreen(false);
+      if (nativeBridge) nativeBridge.setMapFullscreen(false);
+      else if (document.fullscreenElement) void document.exitFullscreen().catch(() => {});
+    } else {
+      setIsFullscreen(true);
+      if (nativeBridge) nativeBridge.setMapFullscreen(true);
+      else if (root.requestFullscreen) void root.requestFullscreen().catch(() => {});
     }
+    window.setTimeout(() => mapInstanceRef.current?.invalidateSize({ animate: false }), 100);
   };
+
+  useEffect(() => {
+    const syncFullscreen = () => {
+      if (!document.fullscreenElement) setIsFullscreen(false);
+      window.setTimeout(() => mapInstanceRef.current?.invalidateSize({ animate: false }), 100);
+    };
+    const nativeExit = () => {
+      setIsFullscreen(false);
+      window.setTimeout(() => mapInstanceRef.current?.invalidateSize({ animate: false }), 100);
+    };
+    document.addEventListener('fullscreenchange', syncFullscreen);
+    window.addEventListener('csrs-native-fullscreen-exit', nativeExit);
+    return () => {
+      document.removeEventListener('fullscreenchange', syncFullscreen);
+      window.removeEventListener('csrs-native-fullscreen-exit', nativeExit);
+    };
+  }, []);
 
   // Ajustar el mapa para mostrar toda la flota (centra y da zoom a los bounds de todos los vehículos reales)
   const fitToFleet = () => {
@@ -349,7 +375,7 @@ export const MapView: React.FC<MapViewProps> = ({
   };
 
   return (
-    <div className="relative w-full h-full overflow-hidden bg-[#000f20]">
+    <div ref={mapRootRef} className={isFullscreen ? "fixed inset-0 z-[2000] w-screen h-screen overflow-hidden bg-[#000f20]" : "relative w-full h-full overflow-hidden bg-[#000f20]"}>
       <div ref={mapContainerRef} className="w-full h-full z-0" />
 
       {selectedVehicle && (
@@ -366,65 +392,66 @@ export const MapView: React.FC<MapViewProps> = ({
         </div>
       )}
 
-      <div className="absolute top-16 right-2 sm:right-4 flex flex-row sm:flex-col gap-2 z-20 select-none">
-        <button
-          onClick={toggleFullscreen}
-          className="bg-[#000f20]/90 backdrop-blur-md border border-[#293a50] p-2.5 sm:p-3 rounded-xl shadow-xl text-slate-300 hover:text-white transition-all hover:border-[#00d1ff] active:scale-95 cursor-pointer"
-          title="Pantalla Completa"
-          aria-label="Alternar pantalla completa"
-        >
-          {isFullscreen ? <Minimize className="w-6 h-6" /> : <Maximize className="w-6 h-6" />}
-        </button>
-
-        <button
-          onClick={fitToFleet}
-          className="bg-[#000f20]/90 backdrop-blur-md border border-[#293a50] p-2.5 sm:p-3 rounded-xl shadow-xl text-slate-300 hover:text-[#00d1ff] hover:border-[#00d1ff] transition-all active:scale-95 cursor-pointer"
-          title="Ajustar a flota"
-          aria-label="Ajustar mapa a toda la flota"
-        >
-          <Target className="w-6 h-6" />
-        </button>
-
+      <div className="absolute top-[14px] right-[12px] z-[1000] flex flex-col gap-[10px] select-none">
         <div className="relative">
           <button
-            onClick={() => setIsLayerMenuOpen(!isLayerMenuOpen)}
-            className={`bg-[#000f20]/90 backdrop-blur-md border p-2.5 sm:p-3 rounded-xl shadow-xl transition-all cursor-pointer active:scale-95 ${
-              isLayerMenuOpen
-                ? 'border-[#00d1ff] text-[#00d1ff] shadow-[0_0_12px_rgba(0,209,255,0.3)]'
-                : 'border-[#293a50] text-slate-300 hover:text-white hover:border-[#00d1ff]'
-            }`}
-            title="Capas del Mapa (sin API, como notificador.sytes.net)"
+            type="button"
+            onClick={() => setIsLayerMenuOpen(open => !open)}
+            className="flex h-11 w-11 items-center justify-center rounded-[10px] border border-[#48c7ed]/60 bg-[#203044]/90 text-white shadow-[0_3px_12px_rgba(0,0,0,0.35)] backdrop-blur-sm transition-colors hover:bg-[#294966] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#48c7ed] sm:h-[52px] sm:w-[52px]"
+            title="Elegir capa del mapa"
+            aria-label="Elegir capa del mapa"
+            aria-expanded={isLayerMenuOpen}
           >
-            <Layers className="w-6 h-6" />
+            <svg width="27" height="27" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M3 8 12 4 21 8 12 12Z" />
+              <path d="M3 13 12 9 21 13 12 17Z" />
+              <path d="M3 17 12 13 21 17 12 21Z" />
+            </svg>
           </button>
-
           {isLayerMenuOpen && (
-            <div className="absolute top-0 right-14 w-52 bg-[#000f20] border border-[#293a50] rounded-xl shadow-2xl z-30 flex flex-col p-1.5 animate-in fade-in zoom-in-95">
-              <div className="text-[10px] font-mono text-slate-500 px-2 py-1 uppercase tracking-wider">Capas</div>
+            <div className="absolute right-[calc(100%+8px)] top-0 w-44 max-w-[calc(100vw-76px)] rounded-[10px] border border-[#48c7ed]/40 bg-[#10263a]/95 p-1.5 text-white shadow-xl backdrop-blur-md" role="menu" aria-label="Capas del mapa">
+              <span className="block px-2 pb-1 text-[10px] font-semibold uppercase tracking-wide text-[#83ddeb]">Capa del mapa</span>
               {[
-                { id: 'gm', label: 'Google Maps', icon: MapIcon, color: '#4285f4' },
-                { id: 'gh', label: 'Google Satelite', icon: Globe, color: '#fbbc05' },
+                { id: 'gm', label: 'Calles', icon: MapIcon },
+                { id: 'gh', label: 'Satelite con calles', icon: Globe },
               ].map(opt => (
                 <button
                   key={opt.id}
-                  onClick={() => {
-                    setMapLayer(opt.id as any);
-                    setIsLayerMenuOpen(false);
-                  }}
-                  className={`flex items-center space-x-2.5 px-3 py-2 text-xs rounded-lg transition-colors cursor-pointer ${
-                    mapLayer === opt.id
-                      ? 'bg-[#011428] text-[#00d1ff] font-semibold border border-[#00d1ff]/30'
-                      : 'text-slate-300 hover:bg-slate-800/60'
-                  }`}
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={mapLayer === opt.id}
+                  onClick={() => { setMapLayer(opt.id as 'gm' | 'gh'); setIsLayerMenuOpen(false); }}
+                  className={mapLayer === opt.id
+                    ? 'flex w-full items-center gap-2 rounded-md bg-[#21476a] px-2 py-2 text-left text-xs text-[#83ddeb]'
+                    : 'flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs hover:bg-[#21476a]'}
                 >
-                  <opt.icon className="w-4 h-4" style={{ color: opt.color }} />
+                  <opt.icon className="h-4 w-4 shrink-0" />
                   <span>{opt.label}</span>
                 </button>
               ))}
-              <div className="text-[9px] font-mono text-slate-600 px-2 pt-1">Solo Google Maps y Google Satelite.</div>
+              <button
+                type="button"
+                onClick={() => { fitToFleet(); setIsLayerMenuOpen(false); }}
+                className="mt-1 flex w-full items-center gap-2 border-t border-[#48c7ed]/20 px-2 py-2 text-left text-xs hover:bg-[#21476a]"
+              >
+                <Target className="h-4 w-4 shrink-0" />
+                <span>Mostrar flota</span>
+              </button>
             </div>
           )}
         </div>
+        <button
+          type="button"
+          onClick={toggleFullscreen}
+          className="flex h-11 w-11 items-center justify-center rounded-[10px] border border-[#48c7ed]/60 bg-[#203044]/90 text-white shadow-[0_3px_12px_rgba(0,0,0,0.35)] backdrop-blur-sm transition-colors hover:bg-[#294966] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#48c7ed] sm:h-[52px] sm:w-[52px]"
+          title={isFullscreen ? 'Salir de pantalla completa' : 'Pantalla completa'}
+          aria-label={isFullscreen ? 'Salir de pantalla completa' : 'Pantalla completa'}
+          aria-pressed={isFullscreen}
+        >
+          <svg width="27" height="27" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M3 9V3h6 M15 3h6v6 M3 15v6h6 M15 21h6v-6" />
+          </svg>
+        </button>
       </div>
     </div>
   );
