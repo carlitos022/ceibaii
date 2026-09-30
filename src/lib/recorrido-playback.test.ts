@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { advancePlayback, eventPosition, playbackPosition } from './recorrido-playback';
+import { buildPlaybackTimeline, toPlaybackClock, fromPlaybackClock, advancePlayback, eventPosition, playbackPosition } from './recorrido-playback';
 test('multipliers preserve real elapsed time on short and multi-day routes', () => {
  for (const end of [600000,7*86400000]) for (const speed of [1,2,4,6,10]) {
   assert.equal(advancePlayback(1000,2000,speed,end),1000+2000*speed);
@@ -20,4 +20,14 @@ test('smooth movement cannot interpolate through outages or large jumps',()=>{
  assert.ok(Math.abs(p.lat+4.0005)<1e-9&&Math.abs(p.lng+79.0005)<1e-9);
  assert.deepEqual(playbackPosition([points[0],{...points[1],stamp:300000}],10000),points[0]);
  assert.deepEqual(playbackPosition([points[0],{...points[1],lat:-10}],10000),points[0]);
+});
+test('five hour GPS gaps are compressed without changing original timestamps',()=>{
+ const original=[{stamp:1000},{stamp:61000},{stamp:18061000},{stamp:18121000}];
+ const copy=JSON.stringify(original), timeline=buildPlaybackTimeline(original);
+ assert.equal(timeline.at(-1)!.clock,240000);
+ assert.equal(fromPlaybackClock(timeline,60000),61000);
+ assert.equal(fromPlaybackClock(timeline,180000),18061000);
+ assert.equal(toPlaybackClock(timeline,18061000),180000);
+ assert.ok(Math.abs(fromPlaybackClock(timeline,toPlaybackClock(timeline,9000000))-9000000)<1);
+ assert.equal(JSON.stringify(original),copy);
 });

@@ -1,3 +1,4 @@
+export const PLAYBACK_BASE_RATE = 300;
 export type TimedPosition = { stamp: number; lat: number; lng: number };
 export function advancePlayback(start: number, elapsedMs: number, multiplier: number, end: number) {
   return Math.min(end, start + Math.max(0, elapsedMs) * multiplier);
@@ -8,7 +9,7 @@ export function validPosition(lat: unknown, lng: unknown): boolean {
     Math.abs(Number(lat)) <= 90 && Math.abs(Number(lng)) <= 180 &&
     !(Number(lat) === 0 && Number(lng) === 0);
 }
-export function pointIndex(points: TimedPosition[], stamp: number) {
+export function pointIndex(points: { stamp: number }[], stamp: number) {
   let lo = 0, hi = points.length - 1;
   while (lo < hi) { const mid = Math.ceil((lo + hi) / 2); if (points[mid].stamp <= stamp) lo = mid; else hi = mid - 1; }
   return lo;
@@ -31,4 +32,28 @@ export function eventPosition(event: { lat: number | null; lng: number | null },
   const nearest = b && Math.abs(b.stamp - stamp) < Math.abs(a.stamp - stamp) ? b : a;
   return validPosition(nearest.lat, nearest.lng) && Math.abs(nearest.stamp - stamp) <= 120000
     ? { lat: nearest.lat, lng: nearest.lng, exact: false } : null;
+}
+export type PlaybackEntry = { stamp: number; clock: number };
+export function buildPlaybackTimeline(points: { stamp: number }[]): PlaybackEntry[] {
+  let clock = 0;
+  return points.map((point, index) => {
+    if (index) clock += Math.min(120000, Math.max(0, point.stamp - points[index - 1].stamp));
+    return { stamp: point.stamp, clock };
+  });
+}
+export function toPlaybackClock(timeline: PlaybackEntry[], stamp: number) {
+  if (!timeline.length) return 0;
+  const index = pointIndex(timeline, stamp), a = timeline[index], b = timeline[index + 1];
+  if (!b || b.stamp <= a.stamp) return a.clock;
+  const ratio = Math.max(0, Math.min(1, (stamp - a.stamp) / (b.stamp - a.stamp)));
+  return a.clock + ratio * (b.clock - a.clock);
+}
+export function fromPlaybackClock(timeline: PlaybackEntry[], clock: number) {
+  if (!timeline.length) return 0;
+  let lo = 0, hi = timeline.length - 1;
+  while (lo < hi) { const mid = Math.ceil((lo + hi) / 2); if (timeline[mid].clock <= clock) lo = mid; else hi = mid - 1; }
+  const a = timeline[lo], b = timeline[lo + 1];
+  if (!b || b.clock <= a.clock) return a.stamp;
+  const ratio = Math.max(0, Math.min(1, (clock - a.clock) / (b.clock - a.clock)));
+  return a.stamp + ratio * (b.stamp - a.stamp);
 }

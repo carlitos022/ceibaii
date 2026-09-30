@@ -4,7 +4,7 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { Bus, CalendarDays, ChevronDown, Crosshair, Layers3, Minus, Pause, Play, Plus, RotateCcw, Search, SkipBack, SkipForward, ListFilter, Tag, Gauge, Power, Clock3, Maximize2, Minimize2, X } from 'lucide-react';
 import { Vehicle } from '../types';
-import { advancePlayback, eventPosition, playbackPosition, pointIndex } from '../lib/recorrido-playback';
+import { buildPlaybackTimeline, toPlaybackClock, fromPlaybackClock, PLAYBACK_BASE_RATE, advancePlayback, eventPosition, playbackPosition, pointIndex } from '../lib/recorrido-playback';
 
 type Point = { time: string; stamp: number; lat: number; lng: number; speed: number | null; heading: number | null };
 type History = { unitNumber: string; from: string; to: string; totalRecords: number; sampled: boolean; points: Point[] };
@@ -38,7 +38,7 @@ export function RecorridoView({ vehicles, token, initialSelection, chromeHidden,
   const [loading, setLoading] = useState(false);
   const [playing, setPlaying] = useState(false);
   const [cursor, setCursor] = useState(0);
-  const [speed, setSpeed] = useState(20);
+  const [speed, setSpeed] = useState(1);
   const [follow, setFollow] = useState(false);
   const [availability, setAvailability] = useState<{ vehicleId: string; date: string; count: number }[] | null>(null);
   const [satellite, setSatellite] = useState(false);
@@ -78,6 +78,7 @@ export function RecorridoView({ vehicles, token, initialSelection, chromeHidden,
   useEffect(() => { if (!vehicles.some(v => v.id === vehicleId)) { setVehicleId(sorted[0]?.id || ''); setHistory(null); setPlaying(false); } }, [vehicles, sorted, vehicleId]);
   const points = history?.points || [];
   const first = points[0]?.stamp || 0, last = points[points.length - 1]?.stamp || 0;
+  const playbackTimeline = useMemo(() => buildPlaybackTimeline(points), [points]);
   const currentIndex = useMemo(() => pointIndex(points, cursor), [points, cursor]);
   const current = points[currentIndex];
   const eventTypes = useMemo(() => Array.from(new Set(events.map(event => event.event_type))), [events]);
@@ -189,20 +190,21 @@ export function RecorridoView({ vehicles, token, initialSelection, chromeHidden,
     if (!playing || !points.length) return;
     let frame = 0;
     const startedAt = performance.now();
-    const startCursor = cursor;
+    const startCursor = toPlaybackClock(playbackTimeline, cursor);
+    const endClock = playbackTimeline[playbackTimeline.length - 1].clock;
     let lastPaint = 0;
     const tick = (now: number) => {
       // El reloj real define la velocidad; los fotogramas lentos no reducen x6 ni x10.
-      const position = advancePlayback(startCursor, now - startedAt, speed, last);
-      if (now - lastPaint >= 50 || position >= last) {
-        setCursor(position);
+      const position = advancePlayback(startCursor, now - startedAt, speed * PLAYBACK_BASE_RATE, endClock);
+      if (now - lastPaint >= 50 || position >= endClock) {
+        setCursor(fromPlaybackClock(playbackTimeline, position));
         lastPaint = now;
       }
-      if (position < last) frame = requestAnimationFrame(tick);
+      if (position < endClock) frame = requestAnimationFrame(tick);
     };
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
-  }, [playing, points, first, last, speed]);
+  }, [playing, points, first, last, speed, playbackTimeline]);
   useEffect(() => { if (playing && cursor >= last) setPlaying(false); }, [playing, cursor, last]);
   const jump = (direction: number) => { if (!points.length) return; setEventFocus(null); setPlaying(false); const point = points[Math.max(0, Math.min(points.length - 1, currentIndex + direction))]; setCursor(point.stamp); map.current?.panTo([point.lat, point.lng]); };
   useEffect(() => {
@@ -244,7 +246,7 @@ export function RecorridoView({ vehicles, token, initialSelection, chromeHidden,
     </div>}
     <div className="relative flex-1 min-h-0 bg-[#14283b]">
       <div ref={mapElement} className="absolute inset-0" role="img" aria-label="Mapa del recorrido GPS" />
-      {fullscreen && <div className="absolute left-2 top-2 z-[500] rounded-lg bg-[#102337]/90 border border-[#34546a] px-2.5 py-1.5 text-xs text-white shadow-lg">{history?.unitNumber || currentVehicle?.unitNumber} · {timeText(current?.stamp)}</div>}
+      {fullscreen && <div className="absolute left-2 top-2 z-[500] rounded-lg bg-[#102337]/90 border border-[#34546a] px-2.5 py-1.5 text-xs text-white shadow-lg">{history?.unitNumber || currentVehicle?.unitNumber} · {timeText(cursor)}</div>}
       <div className="absolute right-2 top-2 z-[500] flex flex-col gap-2">
         <button aria-label={fullscreen ? 'Salir de pantalla completa' : 'Pantalla completa'} onClick={() => setFullscreen(value => !value)} className="rounded-xl bg-[#102337]/90 border border-[#34546a] p-2.5 shadow-lg">{fullscreen ? <Minimize2 className="w-5 h-5" /> : <Maximize2 className="w-5 h-5" />}</button>
         <button aria-label="Ver eventos del recorrido" title="Eventos del recorrido" disabled={!history || eventsLoading} onClick={() => setEventsOpen(true)} className="rounded-xl bg-[#102337] border border-[#34546a] p-2.5 shadow-lg disabled:opacity-45 relative"><ListFilter className="w-5 h-5" />{events.length > 0 && <span className="absolute -top-1 -right-1 rounded-full bg-amber-400 text-[#102337] text-[9px] font-bold min-w-4 px-0.5">{events.length < 500 ? events.length : '500+'}</span>}</button>
@@ -263,7 +265,7 @@ export function RecorridoView({ vehicles, token, initialSelection, chromeHidden,
       {error && <div role="alert" className="absolute left-2 right-14 top-2 z-[500] rounded-xl border border-red-700 bg-red-950/90 p-3 text-xs">{error}</div>}
       {history?.points.length === 0 && <div className="absolute left-2 right-14 top-2 z-[500] rounded-xl border border-[#34546a] bg-[#102337]/95 p-3 text-xs"><p>El CMS no guardó posiciones GPS para esta unidad en el horario elegido.</p>{recentDay && recentDay.date !== fromDate && <button onClick={() => { setFromDate(recentDay.date); setToDate(recentDay.date); setFromTime('00:00'); setToTime('23:59'); void consult({ vehicleId, date: recentDay.date, fromTime: '00:00', toTime: '23:59' }); }} className="mt-2 rounded-lg bg-cyan-700 px-2 py-1.5 font-semibold text-white">Ver último día disponible: {recentDay.date}</button>}</div>}
       {!fullscreen && history && points.length > 0 && <div className="absolute left-2 bottom-2 z-[500] max-w-[70%] rounded-xl border border-[#34546a] bg-[#102337]/95 p-2 text-[11px] shadow-xl">
-        <div className="font-semibold text-cyan-200">{currentVehicle?.unitNumber} · {timeText(current?.stamp)}</div>
+        <div className="font-semibold text-cyan-200">{currentVehicle?.unitNumber} · {timeText(cursor)}</div>
         <div className="text-slate-300">{current?.speed ?? '—'} km/h · {distance.toFixed(1)} km aprox. · {currentIndex + 1}/{points.length} puntos · {history.totalRecords} registros{history.sampled ? ' (muestra real)' : ''}</div>
       </div>}
     </div>
@@ -276,7 +278,7 @@ export function RecorridoView({ vehicles, token, initialSelection, chromeHidden,
             <button aria-label="Punto anterior" disabled={!points.length} onClick={() => jump(-1)} className="p-2 disabled:opacity-40"><SkipBack className="h-4 w-4" /></button>
             <button aria-label="Punto siguiente" disabled={!points.length} onClick={() => jump(1)} className="p-2 disabled:opacity-40"><SkipForward className="h-4 w-4" /></button>
           </div>
-          <label title="x20: veinte segundos del historial por segundo real" className="text-xs text-slate-300 flex items-center gap-1">Velocidad<select aria-label="Velocidad de reproducción" value={speed} onChange={e => setSpeed(Number(e.target.value))} className="rounded-lg border border-[#34546a] bg-[#071626] p-1 text-xs text-white">{[20, 40, 60, 100].map(value => <option value={value} key={value}>×{value}</option>)}</select></label>
+          <div className="text-right"><label title="Escala acelerada: x1 equivale a cinco minutos del historial por segundo real" className="text-xs text-slate-300 flex items-center gap-1">Velocidad<select aria-label="Velocidad de reproducción" value={speed} onChange={e => setSpeed(Number(e.target.value))} className="rounded-lg border border-[#34546a] bg-[#071626] p-1 text-xs text-white">{[1, 3, 6, 10, 20].map(value => <option value={value} key={value}>×{value}</option>)}</select></label><span className="block mt-0.5 text-[9px] text-slate-400">Base x1: 5 min/s</span><span className="block text-[9px] text-slate-400">Huecos GPS abreviados</span></div>
         </div>
         {!fullscreen && <div className="relative h-8 overflow-hidden rounded bg-[#071626] flex items-end gap-px px-1">{chart.map((n, i) => <div key={i} style={{ height: Math.max(2, Math.min(28, n / 100 * 28)) }} className={n > 0 ? 'flex-1 bg-cyan-500/65' : 'flex-1 bg-slate-700/50'} />)}</div>}
         <input aria-label="Línea de tiempo del recorrido" type="range" min={first} max={Math.max(first + 1, last)} step="1000" value={cursor || first} disabled={!points.length} onChange={e => { setEventFocus(null); setPlaying(false); setCursor(Number(e.target.value)); }} className="w-full h-3 accent-[#00d1ff] disabled:opacity-40" />
