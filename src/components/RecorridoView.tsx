@@ -4,6 +4,7 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { Bus, CalendarDays, ChevronDown, Crosshair, Layers3, Minus, Pause, Play, Plus, RotateCcw, Search, SkipBack, SkipForward, ListFilter, Tag, Gauge, Power, Clock3, Maximize2, Minimize2, X } from 'lucide-react';
 import { Vehicle } from '../types';
+import { advancePlayback, eventPosition, playbackPosition, pointIndex } from '../lib/recorrido-playback';
 
 type Point = { time: string; stamp: number; lat: number; lng: number; speed: number | null; heading: number | null };
 type History = { unitNumber: string; from: string; to: string; totalRecords: number; sampled: boolean; points: Point[] };
@@ -47,6 +48,7 @@ export function RecorridoView({ vehicles, token, initialSelection, chromeHidden,
   const [eventsLoading, setEventsLoading] = useState(false);
   const [eventsError, setEventsError] = useState('');
   const [eventFilter, setEventFilter] = useState('all');
+  const [eventFocus, setEventFocus] = useState<{ event: RouteEvent; lat: number; lng: number; exact: boolean } | null>(null);
   const requestId = useRef(0);
   const panelTouchY = useRef<number | null>(null);
   const mapElement = useRef<HTMLDivElement>(null);
@@ -76,11 +78,7 @@ export function RecorridoView({ vehicles, token, initialSelection, chromeHidden,
   useEffect(() => { if (!vehicles.some(v => v.id === vehicleId)) { setVehicleId(sorted[0]?.id || ''); setHistory(null); setPlaying(false); } }, [vehicles, sorted, vehicleId]);
   const points = history?.points || [];
   const first = points[0]?.stamp || 0, last = points[points.length - 1]?.stamp || 0;
-  const currentIndex = useMemo(() => {
-    let lo = 0, hi = points.length - 1;
-    while (lo < hi) { const mid = Math.ceil((lo + hi) / 2); if (points[mid].stamp <= cursor) lo = mid; else hi = mid - 1; }
-    return lo;
-  }, [points, cursor]);
+  const currentIndex = useMemo(() => pointIndex(points, cursor), [points, cursor]);
   const current = points[currentIndex];
   const eventTypes = useMemo(() => Array.from(new Set(events.map(event => event.event_type))), [events]);
   const filteredEvents = useMemo(() => events.filter(event => eventFilter === 'all' || event.event_type === eventFilter), [events, eventFilter]);
@@ -104,7 +102,7 @@ export function RecorridoView({ vehicles, token, initialSelection, chromeHidden,
     if (span < 0 || span > 7 * 24 * 3600_000) { setError('Selecciona un rango de hasta 7 días'); return; }
     const request = ++requestId.current;
     setLoading(true); setError(''); setHistory(null); setPlaying(false);
-    setEvents([]); setEventsError(''); setEventsLoading(false); setEventsOpen(false); setEventFilter('all');
+    setEventFocus(null); setEvents([]); setEventsError(''); setEventsLoading(false); setEventsOpen(false); setEventFilter('all');
     followRef.current = false; setFollow(false);
     try {
       const params = new URLSearchParams({ vehicleId: id, fromDate: startDay, toDate: endDay, fromTime: startHour, toTime: endHour });
@@ -170,7 +168,8 @@ export function RecorridoView({ vehicles, token, initialSelection, chromeHidden,
   }, [history]);
   useEffect(() => {
     if (!marker.current || !current) return;
-    marker.current.setLatLng([current.lat, current.lng]);
+    const position = !playing && eventFocus ? eventFocus : playbackPosition(points, cursor);
+    if (position) marker.current.setLatLng([position.lat, position.lng]);
     const now = performance.now();
     const refresh = !playing || now - lastDraw.current > 90 || currentIndex === points.length - 1;
     if (playedRoute.current && currentIndex !== drawnIndex.current && refresh) {
@@ -185,17 +184,16 @@ export function RecorridoView({ vehicles, token, initialSelection, chromeHidden,
         }
       }
     }
-  }, [currentIndex, history, playing]);
+  }, [cursor, currentIndex, history, playing, eventFocus]);
   useEffect(() => {
     if (!playing || !points.length) return;
     let frame = 0;
     const startedAt = performance.now();
     const startCursor = cursor;
-    const baseRate = Math.max(1, (last - first) / 180000);
     let lastPaint = 0;
     const tick = (now: number) => {
       // El reloj real define la velocidad; los fotogramas lentos no reducen x6 ni x10.
-      const position = Math.min(last, startCursor + (now - startedAt) * baseRate * speed);
+      const position = advancePlayback(startCursor, now - startedAt, speed, last);
       if (now - lastPaint >= 50 || position >= last) {
         setCursor(position);
         lastPaint = now;
@@ -206,7 +204,7 @@ export function RecorridoView({ vehicles, token, initialSelection, chromeHidden,
     return () => cancelAnimationFrame(frame);
   }, [playing, points, first, last, speed]);
   useEffect(() => { if (playing && cursor >= last) setPlaying(false); }, [playing, cursor, last]);
-  const jump = (direction: number) => { if (!points.length) return; setPlaying(false); const point = points[Math.max(0, Math.min(points.length - 1, currentIndex + direction))]; setCursor(point.stamp); map.current?.panTo([point.lat, point.lng]); };
+  const jump = (direction: number) => { if (!points.length) return; setEventFocus(null); setPlaying(false); const point = points[Math.max(0, Math.min(points.length - 1, currentIndex + direction))]; setCursor(point.stamp); map.current?.panTo([point.lat, point.lng]); };
   useEffect(() => {
     if (!fullscreen) return;
     const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') setFullscreen(false); };
@@ -256,6 +254,12 @@ export function RecorridoView({ vehicles, token, initialSelection, chromeHidden,
         {!fullscreen && <button aria-label="Acercar mapa" onClick={() => map.current?.zoomIn()} className="rounded-xl bg-[#102337] border border-[#34546a] p-2.5 shadow-lg"><Plus className="w-5 h-5" /></button>}
         {!fullscreen && <button aria-label="Alejar mapa" onClick={() => map.current?.zoomOut()} className="rounded-xl bg-[#102337] border border-[#34546a] p-2.5 shadow-lg"><Minus className="w-5 h-5" /></button>}
       </div>
+      {eventFocus && <div role="status" aria-label="Evento seleccionado en el mapa" className="absolute left-2 top-2 right-16 z-[500] max-w-sm rounded-xl border border-amber-400 bg-[#102337]/95 p-3 text-xs shadow-xl">
+        <button type="button" aria-label="Quitar evento seleccionado" onClick={() => setEventFocus(null)} className="float-right p-1"><X className="h-4 w-4" /></button>
+        <strong className="block text-amber-300">{eventLabel(eventFocus.event)}</strong>
+        <span className="block mt-1">{timeText(eventStamp(eventFocus.event.event_time))}</span>
+        <span className="block mt-1 text-slate-300">{eventFocus.exact ? 'Ubicacion GPS guardada del evento' : 'Posicion GPS mas cercana; el evento no guardo coordenadas'}</span>
+      </div>}
       {error && <div role="alert" className="absolute left-2 right-14 top-2 z-[500] rounded-xl border border-red-700 bg-red-950/90 p-3 text-xs">{error}</div>}
       {history?.points.length === 0 && <div className="absolute left-2 right-14 top-2 z-[500] rounded-xl border border-[#34546a] bg-[#102337]/95 p-3 text-xs"><p>El CMS no guardó posiciones GPS para esta unidad en el horario elegido.</p>{recentDay && recentDay.date !== fromDate && <button onClick={() => { setFromDate(recentDay.date); setToDate(recentDay.date); setFromTime('00:00'); setToTime('23:59'); void consult({ vehicleId, date: recentDay.date, fromTime: '00:00', toTime: '23:59' }); }} className="mt-2 rounded-lg bg-cyan-700 px-2 py-1.5 font-semibold text-white">Ver último día disponible: {recentDay.date}</button>}</div>}
       {!fullscreen && history && points.length > 0 && <div className="absolute left-2 bottom-2 z-[500] max-w-[70%] rounded-xl border border-[#34546a] bg-[#102337]/95 p-2 text-[11px] shadow-xl">
@@ -267,15 +271,15 @@ export function RecorridoView({ vehicles, token, initialSelection, chromeHidden,
       <div className="mx-auto max-w-5xl">
         <div className="flex items-center gap-2 justify-between">
           <div className="flex items-center gap-1">
-            <button aria-label={playing ? 'Pausar' : 'Reproducir'} disabled={!points.length} onClick={() => { if (!playing && points.length) { const point = cursor >= last ? points[0] : current; if (point && followRef.current) map.current?.panTo([point.lat, point.lng]); if (cursor >= last) setCursor(first); } setPlaying(p => !p); }} className="p-2 rounded-lg text-cyan-200 disabled:opacity-40">{playing ? <Pause className="h-5 w-5" /> : <Play className="h-5 w-5" />}</button>
-            <button aria-label="Reiniciar" disabled={!points.length} onClick={() => { setPlaying(false); setCursor(first); }} className="p-2 disabled:opacity-40"><RotateCcw className="h-4 w-4" /></button>
+            <button aria-label={playing ? 'Pausar' : 'Reproducir'} disabled={!points.length} onClick={() => { setEventFocus(null); if (!playing && points.length) { const point = cursor >= last ? points[0] : current; if (point && followRef.current) map.current?.panTo([point.lat, point.lng]); if (cursor >= last) setCursor(first); } setPlaying(p => !p); }} className="p-2 rounded-lg text-cyan-200 disabled:opacity-40">{playing ? <Pause className="h-5 w-5" /> : <Play className="h-5 w-5" />}</button>
+            <button aria-label="Reiniciar" disabled={!points.length} onClick={() => { setEventFocus(null); setPlaying(false); setCursor(first); }} className="p-2 disabled:opacity-40"><RotateCcw className="h-4 w-4" /></button>
             <button aria-label="Punto anterior" disabled={!points.length} onClick={() => jump(-1)} className="p-2 disabled:opacity-40"><SkipBack className="h-4 w-4" /></button>
             <button aria-label="Punto siguiente" disabled={!points.length} onClick={() => jump(1)} className="p-2 disabled:opacity-40"><SkipForward className="h-4 w-4" /></button>
           </div>
-          <label className="text-xs text-slate-300 flex items-center gap-1">Velocidad<select aria-label="Velocidad de reproducción" value={speed} onChange={e => setSpeed(Number(e.target.value))} className="rounded-lg border border-[#34546a] bg-[#071626] p-1 text-xs text-white">{[1, 2, 4, 6, 10].map(value => <option value={value} key={value}>×{value}</option>)}</select></label>
+          <label title="x1: un segundo del historial por segundo real" className="text-xs text-slate-300 flex items-center gap-1">Velocidad<select aria-label="Velocidad de reproducción" value={speed} onChange={e => setSpeed(Number(e.target.value))} className="rounded-lg border border-[#34546a] bg-[#071626] p-1 text-xs text-white">{[1, 2, 4, 6, 10].map(value => <option value={value} key={value}>×{value}</option>)}</select></label>
         </div>
         {!fullscreen && <div className="relative h-8 overflow-hidden rounded bg-[#071626] flex items-end gap-px px-1">{chart.map((n, i) => <div key={i} style={{ height: Math.max(2, Math.min(28, n / 100 * 28)) }} className={n > 0 ? 'flex-1 bg-cyan-500/65' : 'flex-1 bg-slate-700/50'} />)}</div>}
-        <input aria-label="Línea de tiempo del recorrido" type="range" min={first} max={Math.max(first + 1, last)} step="1000" value={cursor || first} disabled={!points.length} onChange={e => { setPlaying(false); setCursor(Number(e.target.value)); }} className="w-full h-3 accent-[#00d1ff] disabled:opacity-40" />
+        <input aria-label="Línea de tiempo del recorrido" type="range" min={first} max={Math.max(first + 1, last)} step="1000" value={cursor || first} disabled={!points.length} onChange={e => { setEventFocus(null); setPlaying(false); setCursor(Number(e.target.value)); }} className="w-full h-3 accent-[#00d1ff] disabled:opacity-40" />
         <div className="flex justify-between gap-1 text-[9px] text-slate-400"><span className="min-w-0 truncate">{points.length ? new Date(first).toLocaleString('es-EC', {timeZone:'America/Guayaquil'}) : 'Inicio'}</span><span className="min-w-0 truncate text-center">{points.length ? new Date(cursor).toLocaleString('es-EC', {timeZone:'America/Guayaquil'}) : 'Selecciona un rango'}</span><span className="min-w-0 truncate text-right">{points.length ? new Date(last).toLocaleString('es-EC', {timeZone:'America/Guayaquil'}) : 'Fin'}</span></div>
       </div>
     </div>
@@ -292,16 +296,16 @@ export function RecorridoView({ vehicles, token, initialSelection, chromeHidden,
         <div className="overflow-y-auto p-3 space-y-2 pb-[max(20px,env(safe-area-inset-bottom))]">
           {eventsError && <p role="alert" className="rounded-xl border border-red-700 p-3 text-sm text-rose-200">{eventsError}</p>}
           {!eventsError && filteredEvents.length === 0 && <p className="rounded-xl border border-[#34546a] p-4 text-sm text-slate-300">No hay eventos registrados para esta unidad y horario.</p>}
-          {filteredEvents.map(event => <button key={event.id} className="w-full rounded-lg border border-slate-300 bg-slate-100 p-3 text-left text-slate-900 shadow-sm hover:border-emerald-500" onClick={() => {
+          {filteredEvents.map(event => <button type="button" key={event.id} aria-label={eventLabel(event) + ' - Ver evento en el mapa'} className="w-full rounded-lg border border-slate-300 bg-slate-100 p-3 text-left text-slate-900 shadow-sm hover:border-emerald-500 focus-visible:outline-2 focus-visible:outline-cyan-500" onClick={() => {
             const stamp = eventStamp(event.event_time);
-            if (points.length && stamp) {
-              let lo = 0, hi = points.length - 1;
-              while (lo < hi) { const mid = Math.floor((lo + hi) / 2); if (points[mid].stamp < stamp) lo = mid + 1; else hi = mid; }
-              const nearest = lo > 0 && Math.abs(points[lo - 1].stamp - stamp) < Math.abs(points[lo].stamp - stamp) ? points[lo - 1] : points[lo];
-              setCursor(nearest.stamp);
-              map.current?.panTo([nearest.lat, nearest.lng]);
-            } else if (Number.isFinite(Number(event.lat)) && Number.isFinite(Number(event.lng)) && event.lat != null && event.lng != null) map.current?.panTo([Number(event.lat), Number(event.lng)]);
-            setPlaying(false); setEventsOpen(false);
+            const target = eventPosition(event, stamp, points);
+            if (!target) { setEventsError('Este evento no tiene una ubicacion GPS disponible en el recorrido.'); return; }
+            setPlaying(false); setEventFocus({ event, ...target });
+            followRef.current = false; setFollow(false);
+            if (points.length && stamp) setCursor(Math.max(first, Math.min(last, stamp)));
+            marker.current?.setLatLng([target.lat, target.lng]);
+            map.current?.setView([target.lat, target.lng], Math.max(16, map.current.getZoom()), { animate: false });
+            setEventsError(''); setEventsOpen(false);
           }}>
 
             <div className="flex items-start gap-3"><Tag className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" /><span className="text-sm font-bold leading-snug">{eventLabel(event)}</span></div>
@@ -319,7 +323,7 @@ export function RecorridoView({ vehicles, token, initialSelection, chromeHidden,
     </div>, document.body)}
     {picker && createPortal(<div className="fixed inset-0 z-[1200] flex items-end bg-black/70" onClick={() => setPicker(false)}><div role="dialog" aria-label="Seleccionar unidad" className="mx-auto w-full max-w-4xl rounded-t-3xl bg-[#102337] border border-[#34546a] p-4 max-h-[75dvh] flex flex-col" onClick={e => e.stopPropagation()}>
       <div className="mx-auto mb-3 h-1 w-12 rounded-full bg-slate-500" /><div className="flex gap-2 items-center"><Search className="w-5 h-5 text-slate-400" /><input autoFocus value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar disco o placa" className="min-w-0 flex-1 rounded-xl bg-[#071626] p-3 outline-none border border-[#34546a]" /><button aria-label="Cerrar selector" onClick={() => setPicker(false)}><X /></button></div>
-      <div className="mt-3 overflow-y-auto space-y-2 pb-[max(14px,env(safe-area-inset-bottom))]">{filtered.map(v => <button key={v.id} className={`block w-full rounded-xl p-3 text-left border ${v.id === vehicleId ? 'border-cyan-400 bg-cyan-800/40' : 'border-[#34546a] bg-[#071626]'}`} onClick={() => { requestId.current++; setVehicleId(v.id); setHistory(null); setEvents([]); setEventsOpen(false); setPlaying(false); setPicker(false); setSearch(''); }}>{v.unitNumber}<span className="ml-2 text-xs text-slate-400">{availability ? (dayCount(v.id) ? dayCount(v.id).toLocaleString('es-EC') + ' GPS' : 'Sin GPS ese día') : ''}</span></button>)}{!filtered.length && <p className="p-3 text-slate-400">No hay unidades autorizadas coincidentes</p>}</div>
+      <div className="mt-3 overflow-y-auto space-y-2 pb-[max(14px,env(safe-area-inset-bottom))]">{filtered.map(v => <button key={v.id} className={`block w-full rounded-xl p-3 text-left border ${v.id === vehicleId ? 'border-cyan-400 bg-cyan-800/40' : 'border-[#34546a] bg-[#071626]'}`} onClick={() => { requestId.current++; setVehicleId(v.id); setHistory(null); setEventFocus(null); setEvents([]); setEventsOpen(false); setPlaying(false); setPicker(false); setSearch(''); }}>{v.unitNumber}<span className="ml-2 text-xs text-slate-400">{availability ? (dayCount(v.id) ? dayCount(v.id).toLocaleString('es-EC') + ' GPS' : 'Sin GPS ese día') : ''}</span></button>)}{!filtered.length && <p className="p-3 text-slate-400">No hay unidades autorizadas coincidentes</p>}</div>
     </div></div>, document.body)}
   </section>, document.body);
 }
