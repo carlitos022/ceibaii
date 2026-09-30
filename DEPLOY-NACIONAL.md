@@ -1,7 +1,7 @@
 # CSRS N - Nacional
 
 Web: https://nacionalx.ddns.net/app/
-APK: https://nacionalx.ddns.net/app/updates/CSRS-N-v1.0.0.apk
+APK: https://nacionalx.ddns.net/app/updates/CSRS-N-v1.0.1.apk
 Actualizaciones: https://nacionalx.ddns.net/app/updates/nacional.json
 
 ## Arquitectura
@@ -32,7 +32,7 @@ El servicio ejecuta el Node existente del descargador con bootstrap.cjs, directo
 ## APK
 
 La fuente del contenedor Nacional esta en android-national/. Usa Capacitor 8.5.2.
-Nombre: CSRS N. applicationId: ec.customserviciosrs.nacional. Version inicial: 1.0.0, codigo 1.
+Nombre: CSRS N. applicationId: ec.customserviciosrs.nacional. Version actual: 1.0.1, codigo 2.
 URL: https://nacionalx.ddns.net/app/?app=android.
 Las descargas usan Android DownloadManager con cookies de la sesion, carpeta Downloads y notificaciones.
 Las claves de firma y sus contrasenas quedan fuera de Git. Configurar CSRS_SIGNING_STORE y CSRS_SIGNING_PASSWORD_FILE en la maquina de compilacion.
@@ -57,3 +57,8 @@ C:/customserviciosrs/backups/national-downloader-before-web-20260930/server.cjs
 
 Para retirar solo la integracion web, restaurar ese archivo y reiniciar CeibaVideoDownloader cuando no haya trabajos activos.
 No borrar datos, session-secret, cola, videos o configuraciones del CMS.
+## Perfil y arranque (1.0.1)
+
+El perfil editable se guarda en account_profiles, dentro de csrs_nacional; no modifica las cuentas ni permisos del CMS. GET y PUT /api/account/profile identifican la cuenta por el JWT y rechazan campos de permisos o identificadores ajenos. Nombres, apellidos, cedula y propietario son opcionales; no se inventan valores. El modal de unidad solo presenta sensores y equipo realmente disponibles.
+
+La animacion Nacional se muestra tambien en la APK; la ventana y WebView usan fondo oscuro para evitar el destello blanco. La contrasena se envia sin recortar espacios y los tokens vencidos se descartan antes de mostrar la aplicacion.

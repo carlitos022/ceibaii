@@ -23,6 +23,7 @@ public class MainActivity extends BridgeActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        bridge.getWebView().setBackgroundColor(android.graphics.Color.rgb(2, 12, 23));
         bridge.getWebView().setDownloadListener((url, userAgent, contentDisposition, mimeType, contentLength) -> {
             Uri uri = Uri.parse(url);
             Uri origin = Uri.parse(bridge.getWebView().getUrl());

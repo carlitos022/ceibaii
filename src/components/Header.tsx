@@ -11,11 +11,11 @@ export const Header: React.FC<{
         <Menu className="w-6 h-6" />
       </button>
       <span className="text-base sm:text-xl font-bold text-[#00d1ff] tracking-wide drop-shadow-[0_0_8px_rgba(0,209,255,0.4)] truncate">
-        CSRS X
+        CSRS N
       </span>
     </div>
     <div className="flex items-center space-x-2">
-      <button onClick={onOpenSettings} className="w-8 h-8 rounded-full bg-slate-800/60 flex items-center justify-center border border-[#293a50]" aria-label="Configuración">
+      <button onClick={onOpenSettings} className="w-8 h-8 rounded-full bg-slate-800/60 flex items-center justify-center border border-[#293a50]" aria-label="Opciones de cuenta">
         <Settings className="w-4 h-4" />
       </button>
       <button onClick={onOpenSettings} className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center text-white border border-[#293a50]" aria-label="Cuenta">

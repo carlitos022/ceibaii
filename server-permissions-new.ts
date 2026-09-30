@@ -1,3 +1,4 @@
+import { registerAccountProfile } from './server/account-profile';
 import express from 'express';
 import { registerAdminDownloader } from './server/admin-downloader';
 import path from 'path';
@@ -254,6 +255,7 @@ async function startServer() {
     }
   }
 
+  registerAccountProfile(app, JWT_SECRET);
   registerAdminDownloader(app, JWT_SECRET, requireAppAuth);
 
   // Apply Ceiba II account permissions to every fleet endpoint below.

@@ -83,12 +83,14 @@ export default function App() {
 
   // Auth States
   const [auth, setAuth] = useState<AuthState>({ user: null, token: null });
-  const [showSplash, setShowSplash] = useState(!embeddedShell);
+  const [showSplash, setShowSplash] = useState(!embeddedVivo);
   const [showLogin, setShowLogin] = useState(false);
   const [loginError, setLoginError] = useState('');
   const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const loginEpoch = useRef(0);
 
   const handleLogout = () => {
+    loginEpoch.current += 1;
     void fetch('/api/admin-downloader/logout', { method: 'POST', headers: { Authorization: 'Bearer ' + auth.token } });
     localStorage.removeItem('csrs_auth');
     setGeofences([]); setAlerts([]); setLibrary([]); setDownloads([]);
@@ -120,25 +122,23 @@ export default function App() {
       try {
         const parsed = JSON.parse(stored);
         if (parsed.token && parsed.user) {
-          setAuth(parsed);
+          const claim = JSON.parse(atob(parsed.token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+          if (Number(claim.exp) * 1000 > Date.now()) setAuth(parsed);
+          else { localStorage.removeItem('csrs_auth'); setLoginError('Su sesion vencio. Inicie sesion nuevamente.'); }
         }
-      } catch (e) {}
+      } catch (e) { localStorage.removeItem('csrs_auth'); }
     }
   }, []);
 
-  // Splash screen
+  // Play startup once, including Android; restore login after the animation.
   useEffect(() => {
-    if (embeddedShell) {
-      setShowSplash(false);
-      setShowLogin(!auth.token);
-      return;
-    }
-    const timer = setTimeout(() => {
-      setShowSplash(false);
-      setShowLogin(!auth.token);
-    }, 2000);
-    return () => clearTimeout(timer);
-  }, [auth.token, embeddedShell]);
+    if (embeddedVivo) { setShowSplash(false); return; }
+    const timer = window.setTimeout(() => setShowSplash(false), 2200);
+    return () => window.clearTimeout(timer);
+  }, [embeddedVivo]);
+  useEffect(() => {
+    if (!showSplash) setShowLogin(!auth.token);
+  }, [showSplash, auth.token]);
 
   // Helpers to normalize API responses (handles both new mock API and old Ceiba 12058 API wrapped in {code,result})
   const normalizeArray = <T,>(data: any, fallback: T[]): T[] => {
@@ -255,9 +255,11 @@ export default function App() {
 
   const handleLogin = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    if (isLoggingIn) return;
+    const attempt = ++loginEpoch.current;
     const formData = new FormData(e.currentTarget);
     const username = (formData.get('username') as string || '').trim();
-    const password = (formData.get('password') as string || '').trim();
+    const password = (formData.get('password') as string || '');
 
     if (!username || !password) return;
     setIsLoggingIn(true);
@@ -267,9 +269,11 @@ export default function App() {
       const res = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password })
+        body: JSON.stringify({ username, password }),
+        signal: AbortSignal.timeout(20000)
       });
       const data = await res.json().catch(() => null);
+      if (attempt !== loginEpoch.current) return;
       // Old backend: {code:200, result:true, token, user:{uid,account}}  New backend: {code:200, token, user, result}
       const isSuccess = data && data.code === 200 && data.token && (data.result || data.user);
       if (isSuccess) {
@@ -282,9 +286,9 @@ export default function App() {
       }
       setLoginError((data && (data.error || data.errorcase)) || 'Credenciales inválidas');
     } catch (e) {
-      setLoginError('No se pudo conectar con Ceiba II');
+      if (attempt === loginEpoch.current) setLoginError('No se pudo conectar con Ceiba II. Intente nuevamente.');
     } finally {
-      setIsLoggingIn(false);
+      if (attempt === loginEpoch.current) setIsLoggingIn(false);
     }
   };
 
@@ -412,38 +416,8 @@ export default function App() {
         </div>
         <div className="text-center relative z-10">
           <div className="mb-6">
-            <svg className="w-24 h-24 mx-auto" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
-              <defs>
-                <linearGradient id="gm" x1="0%" x2="100%" y1="0%" y2="100%">
-                  <stop offset="0%" style={{ stopColor: '#00e5ff' }} />
-                  <stop offset="100%" style={{ stopColor: '#007bff' }} />
-                </linearGradient>
-                <linearGradient id="ga" x1="0%" x2="100%" y1="0%" y2="100%">
-                  <stop offset="0%" style={{ stopColor: '#ff9100' }} />
-                  <stop offset="100%" style={{ stopColor: '#ffcc00' }} />
-                </linearGradient>
-                <filter height="140%" id="gl" width="140%" x="-20%" y="-20%">
-                  <feGaussianBlur result="blur" stdDeviation="15" />
-                  <feComposite in="SourceGraphic" in2="blur" operator="over" />
-                </filter>
-              </defs>
-              <path d="M720,512c0,114.9-93.1,208-208,208S304,626.9,304,512s93.1-208,208-208c45.4,0,87.4,14.6,121.7,39.3" fill="none" filter="url(#gl)" stroke="url(#gm)" strokeLinecap="round" strokeWidth="80">
-                <animate attributeName="stroke-dasharray" dur="3s" fill="freeze" from="0, 2000" to="2000, 0" />
-                <animate attributeName="opacity" dur="4s" repeatCount="indefinite" values="0.8;1;0.8" />
-              </path>
-              <g>
-                <circle cx="650" cy="350" fill="url(#ga)" filter="url(#gl)" r="100">
-                  <animateTransform attributeName="transform" dur="3s" repeatCount="indefinite" type="translate" values="0,0; 0,-20; 0,0" />
-                </circle>
-                <path d="M550,350 Q600,350 650,350" stroke="url(#ga)" strokeLinecap="round" strokeWidth="60">
-                  <animateTransform attributeName="transform" dur="3s" repeatCount="indefinite" type="translate" values="0,0; 0,-10; 0,0" />
-                </path>
-              </g>
-              <circle cx="512" cy="512" fill="white" r="10">
-                <animate attributeName="r" dur="5s" repeatCount="indefinite" values="0;150;0" />
-                <animate attributeName="opacity" dur="5s" repeatCount="indefinite" values="0;0.3;0" />
-              </circle>
-            </svg>
+            <img src={(import.meta as any).env.BASE_URL + 'csrs-n-logo.png'} alt="CSRS N" className="w-28 h-28 mx-auto rounded-2xl" style={{ animation: 'csrs-n-intro 2.2s ease-out both' }} />
+            <style>{`@keyframes csrs-n-intro { 0% { opacity: 0; transform: scale(.84); } 35% { opacity: 1; transform: scale(1); } 75% { opacity: 1; } 100% { opacity: .95; } }`}</style>
           </div>
           <div className="font-bold text-3xl leading-none tracking-tight flex flex-col items-center">
             <span className="text-white uppercase">Custom</span>
@@ -673,6 +647,10 @@ export default function App() {
         isOpen={isSettingsModalOpen}
         onClose={() => setIsSettingsModalOpen(false)}
         onLogout={handleLogout}
+        token={auth.token}
+        account={auth.user?.account || auth.user?.un}
+        unitsCount={vehicles.length}
+        isAdministrator={Number(auth.user?.roleid ?? auth.user?.rid) === 1}
       />
 
       {!embeddedVivo && <BottomNavBar activeTab={activeTab} onTabChange={setActiveTab} />}
