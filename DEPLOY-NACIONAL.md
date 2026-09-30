@@ -14,7 +14,7 @@ bootstrap.cjs lee en memoria la configuracion del CMS y el secreto de sesion del
 La base csrs_nacional contiene eventos y programaciones propios; las tablas del CMS se consultan sin modificarlas.
 Biblioteca comparte los permisos y trabajos del descargador existente. Vivo, Recorrido, Rastreo, Despacho y canales consultan los permisos de /api/vehicles del descargador. Ante un error de permisos se bloquea la consulta.
 
-Despacho usa el historial GPS y las geocercas propias de Nacional (46 al revisar), sin instalar Miratrans ni copiar datos de Cariamanga.
+Despacho usa el historial GPS y las geocercas propias de Nacional (46 guardadas; 45 con geometria validada), sin instalar Miratrans ni copiar datos de Cariamanga.
 Los cruces se calculan a partir de coordenadas validas. Un inicio de historial o una interrupcion de mas de diez minutos no inventa entradas/salidas.
 Los retrasos se calculan solo para controles programados: minutos de retraso redondeados hacia arriba por la tarifa configurada. No se crea una multa sin programacion.
 
@@ -46,6 +46,8 @@ La firma estable de produccion se comprueba al instalar actualizaciones, ademas 
 - Navegacion por las cinco pestanas en 390x844 y 1366x900: sin errores JavaScript. Ocultar/recuperar toda la cabecera en Recorrido movil: correcto.
 - Cola sin trabajos activos durante la publicacion y hash conservado tras reiniciar el descargador.
 - APK release compilado en Cariamanga y firma verificada.
+- CMS real: 190 posiciones en una hora consultada, informe de Despacho HTTP 200, eventos persistidos y SSE con datos.
+- Una geocerca usa tres valores en KeyPoints y requiere confirmar su formato antes de activarla. No se alteraron sus datos.
 - No se hizo una descarga nueva ni se cancelaron trabajos reales para las pruebas. No se ha probado la APK en un telefono fisico durante este despliegue.
 
 ## Respaldo
