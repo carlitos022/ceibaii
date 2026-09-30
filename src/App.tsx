@@ -83,7 +83,7 @@ export default function App() {
 
   // Auth States
   const [auth, setAuth] = useState<AuthState>({ user: null, token: null });
-  const [showSplash, setShowSplash] = useState(!embeddedShell);
+  const [showSplash, setShowSplash] = useState(!embeddedVivo);
   const [showLogin, setShowLogin] = useState(false);
   const [loginError, setLoginError] = useState('');
   const [isLoggingIn, setIsLoggingIn] = useState(false);
@@ -119,19 +119,18 @@ export default function App() {
     }
   }, []);
 
-  // Splash screen
+  // Play the existing intro once in the browser and Android container.
   useEffect(() => {
-    if (embeddedShell) {
+    if (embeddedVivo) {
       setShowSplash(false);
-      setShowLogin(!auth.token);
       return;
     }
-    const timer = setTimeout(() => {
-      setShowSplash(false);
-      setShowLogin(!auth.token);
-    }, 2000);
-    return () => clearTimeout(timer);
-  }, [auth.token, embeddedShell]);
+    const timer = window.setTimeout(() => setShowSplash(false), 2000);
+    return () => window.clearTimeout(timer);
+  }, [embeddedVivo]);
+  useEffect(() => {
+    if (!showSplash) setShowLogin(!auth.token);
+  }, [showSplash, auth.token]);
 
   // Helpers to normalize API responses (handles both new mock API and old Ceiba 12058 API wrapped in {code,result})
   const normalizeArray = <T,>(data: any, fallback: T[]): T[] => {
