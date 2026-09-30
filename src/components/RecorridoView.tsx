@@ -38,7 +38,7 @@ export function RecorridoView({ vehicles, token, initialSelection, chromeHidden,
   const [loading, setLoading] = useState(false);
   const [playing, setPlaying] = useState(false);
   const [cursor, setCursor] = useState(0);
-  const [speed, setSpeed] = useState(1);
+  const [speed, setSpeed] = useState(20);
   const [follow, setFollow] = useState(false);
   const [availability, setAvailability] = useState<{ vehicleId: string; date: string; count: number }[] | null>(null);
   const [satellite, setSatellite] = useState(false);
@@ -276,7 +276,7 @@ export function RecorridoView({ vehicles, token, initialSelection, chromeHidden,
             <button aria-label="Punto anterior" disabled={!points.length} onClick={() => jump(-1)} className="p-2 disabled:opacity-40"><SkipBack className="h-4 w-4" /></button>
             <button aria-label="Punto siguiente" disabled={!points.length} onClick={() => jump(1)} className="p-2 disabled:opacity-40"><SkipForward className="h-4 w-4" /></button>
           </div>
-          <label title="x1: un segundo del historial por segundo real" className="text-xs text-slate-300 flex items-center gap-1">Velocidad<select aria-label="Velocidad de reproducción" value={speed} onChange={e => setSpeed(Number(e.target.value))} className="rounded-lg border border-[#34546a] bg-[#071626] p-1 text-xs text-white">{[1, 2, 4, 6, 10].map(value => <option value={value} key={value}>×{value}</option>)}</select></label>
+          <label title="x20: veinte segundos del historial por segundo real" className="text-xs text-slate-300 flex items-center gap-1">Velocidad<select aria-label="Velocidad de reproducción" value={speed} onChange={e => setSpeed(Number(e.target.value))} className="rounded-lg border border-[#34546a] bg-[#071626] p-1 text-xs text-white">{[20, 40, 60, 100].map(value => <option value={value} key={value}>×{value}</option>)}</select></label>
         </div>
         {!fullscreen && <div className="relative h-8 overflow-hidden rounded bg-[#071626] flex items-end gap-px px-1">{chart.map((n, i) => <div key={i} style={{ height: Math.max(2, Math.min(28, n / 100 * 28)) }} className={n > 0 ? 'flex-1 bg-cyan-500/65' : 'flex-1 bg-slate-700/50'} />)}</div>}
         <input aria-label="Línea de tiempo del recorrido" type="range" min={first} max={Math.max(first + 1, last)} step="1000" value={cursor || first} disabled={!points.length} onChange={e => { setEventFocus(null); setPlaying(false); setCursor(Number(e.target.value)); }} className="w-full h-3 accent-[#00d1ff] disabled:opacity-40" />
