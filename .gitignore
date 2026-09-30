@@ -20,3 +20,10 @@ videos/
 .idea/
 .vscode/
 *.tsbuildinfo
+
+.gradle/
+build/
+local.properties
+google-services.json
+*password*.txt
+*.idsig

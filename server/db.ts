@@ -1,6 +1,8 @@
 import mysql, { Pool } from 'mysql2/promise';
 
 let pool: Pool | null = null;
+let appPool: Pool | null = null;
+let trackerReady = false;
 let isConnected = false;
 let lastError: string | null = null;
 
@@ -13,7 +15,7 @@ export function getDbConfig() {
     database: process.env.MYSQL_DATABASE || 'ceiba2_db',
     connectTimeout: 3000,
     waitForConnections: true,
-    connectionLimit: 10,
+    connectionLimit: 4,
     queueLimit: 0
   };
 }
@@ -28,6 +30,10 @@ export async function initDbPool(): Promise<boolean> {
     const conn = await pool.getConnection();
     await conn.ping();
     conn.release();
+    const applicationDb = process.env.APP_DATABASE || 'csrs_nacional';
+    if (!/^[a-zA-Z0-9_]+$/.test(applicationDb)) throw new Error('Invalid application database');
+    await pool.query('CREATE DATABASE IF NOT EXISTS `' + applicationDb + '` CHARACTER SET utf8mb4');
+    appPool = mysql.createPool({ ...config, database: applicationDb, connectionLimit: 2 });
     isConnected = true;
     lastError = null;
     console.log(`[MySQL] Conectado exitosamente a ${config.host}:${config.port}/${config.database}`);
@@ -53,7 +59,9 @@ export async function executeQuery<T = any>(sql: string, params: any[] = []): Pr
     return null;
   }
   try {
-    const [rows] = await pool.execute(sql, params);
+    const target = /\b(tracker_events|dispatch_schedules)\b/.test(sql) ? appPool : pool;
+    if (!target) return null;
+    const [rows] = await target.execute(sql, params);
     return rows as T[];
   } catch (err: any) {
     console.error(`[MySQL Query Error] ${err.message} -> SQL: ${sql}`);
@@ -62,9 +70,10 @@ export async function executeQuery<T = any>(sql: string, params: any[] = []): Pr
 }
 
 export async function ensureTrackerEventsTable(): Promise<boolean> {
-  if (!isConnected || !pool) return false;
+  if (!isConnected || !appPool) return false;
+  if (trackerReady) return true;
   try {
-    await pool.execute(`
+    await appPool.execute(`
       CREATE TABLE IF NOT EXISTS tracker_events (
         id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
         vehicle_id VARCHAR(64) NOT NULL,
@@ -85,6 +94,7 @@ export async function ensureTrackerEventsTable(): Promise<boolean> {
         INDEX idx_tracker_events_vehicle_time (vehicle_id, event_time)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     `);
+    trackerReady = true;
     return true;
   } catch (err: any) {
     console.error(`[MySQL] tracker_events init failed: ${err.message}`);

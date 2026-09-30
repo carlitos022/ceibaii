@@ -1,1 +1,1 @@
-export const BUILD_VERSION = "2026-09-29-recorrido-top-completo";
+export const BUILD_VERSION = "2026-09-30T01-10-34-185Z-b6b5e11";

@@ -77,7 +77,7 @@ export function DespachoView({ vehicles, token, onOpenRecorrido }: { vehicles: V
   const open = (row: Dispatch, view: 'route' | 'ticket') => { setDetail(row); setMode(view); };
   return <section className="absolute inset-x-0 top-14 bottom-16 overflow-y-auto overscroll-contain bg-[#071626] text-slate-100">
     <div className="mx-auto max-w-4xl px-3 sm:px-6 pt-4 pb-8">
-      <div className="mb-4"><h1 className="text-xl font-semibold text-white">Despachos</h1><p className="text-xs text-slate-400">Cooperativa Cariamanga · reportes por unidad</p></div>
+      <div className="mb-4"><h1 className="text-xl font-semibold text-white">Despachos</h1><p className="text-xs text-slate-400">Mis unidades · reportes por unidad</p></div>
       <div className="rounded-2xl border border-[#294458] bg-[#10283c] p-3 sm:p-5 shadow-xl">
         <div className="grid grid-cols-2 gap-2 sm:gap-4">
           <button type="button" onClick={() => setPicker(true)} className="min-w-0 min-h-12 rounded-xl border border-[#34546a] bg-[#0a1a2b] px-2 flex items-center gap-2 text-left">

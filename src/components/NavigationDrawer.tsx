@@ -202,10 +202,10 @@ export const NavigationDrawer: React.FC<NavigationDrawerProps> = ({
               <div className="pl-3 space-y-1 mt-1 border-l border-[#293a50]/60 ml-3">
                 {filteredVehicles.map(vehicle => {
                   const isSelected = vehicle.id === selectedVehicleId || vehicle.unitNumber === selectedVehicleId;
-                  
+
                   let statusColor = '#6b7280';
                   let statusLabel = vehicle.statusText;
-                  
+
                   if (vehicle.status === 'moving') {
                     statusColor = '#ff9100';
                     statusLabel = `En ruta - ${vehicle.speed} km/h`;

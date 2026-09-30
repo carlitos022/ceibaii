@@ -89,7 +89,9 @@ export default function App() {
   const [isLoggingIn, setIsLoggingIn] = useState(false);
 
   const handleLogout = () => {
+    void fetch('/api/admin-downloader/logout', { method: 'POST', headers: { Authorization: 'Bearer ' + auth.token } });
     localStorage.removeItem('csrs_auth');
+    setGeofences([]); setAlerts([]); setLibrary([]); setDownloads([]);
     setAuth({ user: null, token: null });
     setIsSettingsModalOpen(false);
     setIsDrawerOpen(false);
@@ -101,6 +103,15 @@ export default function App() {
     setShowLogin(true);
     setLoginError('');
   };
+
+  useEffect(() => {
+    const onMessage = (event: MessageEvent) => {
+      if (event.origin === location.origin && event.data?.type === 'csrs:logout' &&
+          event.source === document.querySelector<HTMLIFrameElement>('iframe[title="Centro de descargas CEIBA SD"]')?.contentWindow) handleLogout();
+    };
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+  }, [auth.token]);
 
   // Load auth from localStorage on mount
   useEffect(() => {
@@ -181,6 +192,7 @@ export default function App() {
       const libData = normalizeArray<LibraryRecord>(libRaw, []);
       const dlData = normalizeArray<DownloadJob>(dlRaw, []);
 
+      if (JSON.parse(localStorage.getItem('csrs_auth') || '{}').token !== token) return;
       setVehicles(vehData);
       setGeofences(geoData);
       setAlerts(altData);
@@ -212,6 +224,7 @@ export default function App() {
 
     eventSource.onmessage = (event) => {
       try {
+        if (JSON.parse(localStorage.getItem('csrs_auth') || '{}').token !== auth.token) return;
         const data = JSON.parse(event.data);
         if (data.type === 'telemetry_update' && Array.isArray(data.vehicles)) {
           lastTelemetryAt = Date.now();
@@ -628,7 +641,7 @@ export default function App() {
         </div>
 
         {/* Tab 2: Biblioteca de Grabaciones */}
-        {activeTab === 'biblioteca' && <DownloaderLibraryView token={auth.token} isAdmin={Number(auth.user?.roleid) === 1} />}
+        {activeTab === 'biblioteca' && <DownloaderLibraryView token={auth.token} isAdmin={true} />}
         {activeTab === 'rastreo' && <RastreoView vehicles={vehicles} token={auth.token} onOpenVehicle={(vehicle) => { setSelectedVehicle(vehicle); setIsDetailModalOpen(true); }} />}
         {activeTab === 'despacho' && <DespachoView vehicles={vehicles} token={auth.token} onOpenRecorrido={(selection) => { setRecorridoSelection(selection); setActiveTab('recorrido'); }} />}
         {activeTab === 'recorrido' && <RecorridoView vehicles={vehicles} token={auth.token} initialSelection={recorridoSelection} chromeHidden={recorridoChromeHidden} onChromeHiddenChange={setRecorridoChromeHidden} />}

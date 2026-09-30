@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">CSRS N</string>
+    <string name="title_activity_main">CSRS N</string>
+    <string name="package_name">ec.customserviciosrs.nacional</string>
+    <string name="custom_url_scheme">ec.customserviciosrs.nacional</string>
+</resources>

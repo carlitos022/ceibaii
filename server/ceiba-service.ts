@@ -3,6 +3,7 @@ import { Vehicle, AlertItem, Geofence, LibraryRecord, DownloadJob } from '../src
 import { executeQuery, ensureTrackerEventsTable, isDbConnected } from './db';
 import fs from 'fs';
 import path from 'path';
+import { insideFence } from './geofence-geometry';
 
 const LAST_GPS_PATH = process.env.CEIBA_LAST_GPS_PATH || 'C:/Program Files (x86)/CMS Server/TransmitServer/AlarmServer/LastGps.txt';
 const ONLINE_THRESHOLD_SEC = Number(process.env.GPS_FRESHNESS_SECONDS || 600);
@@ -33,17 +34,7 @@ async function cachedFences(): Promise<Geofence[]> {
 }
 function fencesAt(lat: number | null, lng: number | null, fences: Geofence[]): string[] {
   if (lat == null || lng == null) return [];
-  const inside: { name: string; meters: number }[] = [];
-  for (const fence of fences) {
-    if (!fence.center || !fence.radiusMeters) continue;
-    const [north, east] = fence.center;
-    const dLat = (lat - north) * Math.PI / 180;
-    const dLng = (lng - east) * Math.PI / 180;
-    const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat * Math.PI / 180) * Math.cos(north * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
-    const meters = 12742000 * Math.asin(Math.min(1, Math.sqrt(a)));
-    if (meters <= fence.radiusMeters) inside.push({ name: fence.name, meters });
-  }
-  return inside.sort((a, b) => a.meters - b.meters).map(item => item.name);
+  return fences.filter(fence => insideFence(lat, lng, fence)).map(fence => fence.name);
 }
 function fenceAt(lat: number | null, lng: number | null, fences: Geofence[]): string {
   return fencesAt(lat, lng, fences)[0] || '';
@@ -442,14 +433,19 @@ export function getVehicleById(idOrUnitNumber: string): Vehicle | undefined {
 export async function getGeofences(): Promise<Geofence[]> {
   const rows = await getGeofencesReal();
   return rows.flatMap((row: any) => {
-    const points = String(row.KeyPoints || '').split(',').map(Number);
-    const lat = points[0], lng = points[1];
-    if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180 || (!lat && !lng)) return [];
-    const radius = Number(row.Radius);
-    if (!Number.isFinite(radius) || radius <= 0) return [];
-    return [{ id: String(row.FenceID), name: String(row.FenceCode || row.FenceID), type: 'terminal' as const,
-      typeLabel: 'Geocerca', coordinates: [] as [number, number][], center: [lat, lng] as [number, number],
-      radiusMeters: radius, activeUnitsCount: 0, alertOnEntry: false, alertOnExit: false, color: '#f59e0b' }];
+    const values = String(row.KeyPoints || '').split(/[;,]/).filter(v => v.trim() !== '').map(Number);
+    const valid = (lat: number, lng: number) => Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180 && Boolean(lat || lng);
+    const common = { id: String(row.FenceID), name: String(row.FenceCode || row.FenceID), type: 'terminal' as const,
+      typeLabel: 'Geocerca', activeUnitsCount: 0, alertOnEntry: false, alertOnExit: false, color: '#f59e0b' };
+    if (Number(row.Radius) > 0 && values.length === 2 && valid(values[0], values[1])) {
+      return [{ ...common, coordinates: [] as [number, number][], center: [values[0], values[1]] as [number, number], radiusMeters: Number(row.Radius) }];
+    }
+    const coordinates: [number, number][] = [];
+    for (let i = 0; i + 1 < values.length; i += 2) {
+      if (!valid(values[i], values[i + 1])) return [];
+      coordinates.push([values[i], values[i + 1]]);
+    }
+    return coordinates.length >= 3 ? [{ ...common, coordinates, center: undefined, radiusMeters: undefined }] : [];
   });
 }
 // Real fences fetch is done via client proxy to miritrans; server keeps mock as fallback but we expose real via separate function for future

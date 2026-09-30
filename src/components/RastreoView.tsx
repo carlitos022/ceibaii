@@ -206,7 +206,7 @@ export const RastreoView: React.FC<Props> = ({ vehicles, onOpenVehicle, token })
       <div className="absolute top-[68px] left-3 right-3 sm:right-auto sm:w-[360px] flex gap-2" style={{ zIndex: 1000 }}>
         <button type="button" onClick={() => { setIsSelectorOpen(true); setIsListOpen(false); }}
           className="flex-1 min-w-0 flex items-center justify-between gap-2 rounded-2xl bg-[#061d2b]/95 text-white px-4 py-3 shadow-xl border border-cyan-500/30">
-          <span className="flex items-center gap-2 truncate"><Building2 size={19} className="text-cyan-400 shrink-0" /><b className="truncate">Cooperativa Cariamanga</b></span>
+          <span className="flex items-center gap-2 truncate"><Building2 size={19} className="text-cyan-400 shrink-0" /><b className="truncate">Mis unidades</b></span>
           <ChevronDown size={18} />
         </button>
       </div>
@@ -244,13 +244,13 @@ export const RastreoView: React.FC<Props> = ({ vehicles, onOpenVehicle, token })
             onClick={event => event.stopPropagation()}>
             <div className="mx-auto mt-3 mb-2 w-12 h-1 rounded-full bg-slate-300" />
             <div className="px-4 pb-3 flex items-center gap-3">
-              <h2 className="font-bold text-lg flex-1">{'Cooperativa Cariamanga'}</h2>
+              <h2 className="font-bold text-lg flex-1">{'Mis unidades'}</h2>
               <button type="button" onClick={() => { setIsSelectorOpen(false); setIsListOpen(false); }} aria-label="Cerrar panel"><X size={22} /></button>
             </div>
             {isSelectorOpen && (
               <button type="button" className="mx-4 mb-3 rounded-xl p-3 flex items-center gap-3 bg-[#d8f4e8] text-[#075d39] font-bold"
                 onClick={() => { setIsSelectorOpen(false); setIsListOpen(true); }}>
-                <Building2 size={22} /> Cooperativa Cariamanga <span className="ml-auto">{vehicles.length}</span>
+                <Building2 size={22} /> Mis unidades <span className="ml-auto">{vehicles.length}</span>
               </button>
             )}
             <label className="mx-4 mb-3 flex items-center gap-2 rounded-xl border border-slate-300 px-3 bg-white">

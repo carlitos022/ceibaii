@@ -1,0 +1,13 @@
+{
+    "appId":  "ec.customserviciosrs.nacional",
+    "appName":  "CSRS N",
+    "webDir":  "www",
+    "server":  {
+                   "cleartext":  false,
+                   "url":  "https://nacionalx.ddns.net/app/?app=android",
+                   "allowNavigation":  [
+                                           "nacionalx.ddns.net"
+                                       ],
+                   "androidScheme":  "https"
+               }
+}

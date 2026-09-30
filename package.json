@@ -11,7 +11,8 @@
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
     "test:live": "node --import tsx --test server/live-flv.test.ts",
-    "test:live:e2e": "node scripts/live-e2e.mjs"
+    "test:live:e2e": "node scripts/live-e2e.mjs",
+    "test:nacional": "node --import tsx --test server/nacional.test.ts"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.1.14",

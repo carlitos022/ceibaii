@@ -14,7 +14,7 @@ export const DownloaderLibraryView: React.FC<{ token: string | null; isAdmin: bo
           method: 'POST', headers: { Authorization: 'Bearer ' + token },
           credentials: 'same-origin', cache: 'no-store'
         });
-        if (!response.ok) throw new Error('No se pudo abrir la sesión del administrador');
+        if (!response.ok) throw new Error('No se pudo abrir la sesion de la cuenta');
         if (active) { setError(''); setReady(true); }
       } catch (e) {
         if (active) { setReady(false); setError('No se pudo abrir Biblioteca. Vuelve a iniciar sesión.'); }
@@ -31,7 +31,7 @@ export const DownloaderLibraryView: React.FC<{ token: string | null; isAdmin: bo
   if (error) return <section className="flex h-full items-center justify-center bg-[#000f20] px-6 text-center text-rose-300">{error}</section>;
   if (!ready) return <section className="flex h-full items-center justify-center bg-[#000f20] text-cyan-300">Abriendo Biblioteca...</section>;
   return <section className="w-full h-full min-h-0 overflow-hidden bg-[#000f20] pb-16">
-    <iframe title="Centro de descargas CEIBA SD" src="/admin-downloader/"
+    <iframe title="Centro de descargas CEIBA SD" key={token} src={(import.meta as any).env.BASE_URL + "admin-downloader/"}
       className="block w-full h-full min-h-[calc(100vh-4rem)] border-0" loading="eager" />
   </section>;
 };

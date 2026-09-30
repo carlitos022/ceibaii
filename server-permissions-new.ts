@@ -10,7 +10,8 @@ import http from 'http';
 import { Readable, Transform } from 'stream';
 import { pipeline } from 'stream/promises';
 import { CeibaLiveFlv } from './server/live-flv';
-import { createServer as createViteServer } from 'vite';
+import { downloaderBase, publicPath, getDownloaderVehicles, downloaderToken } from './server/nacional-access';
+import { getNationalDispatchReport } from './server/nacional-dispatch';
 import { initDbPool, testConnectionAndSchema, getDbConfig, isDbConnected, getDbLastError, executeQuery, ensureTrackerEventsTable } from './server/db';
 import {
   startTelemetrySimulation,
@@ -51,7 +52,7 @@ function formatQuitoDate(date: Date): string {
 }
 
 const CHANNEL_FALLBACK_CACHE: Record<number, string> = {};
-const AUTHORIZED_DEVICE_CACHE = new Map<string, { expires: number; ids: Set<string> }>();
+let dispatchSchedulesReady = false;
 
 function searchChannelInDir(baseDir: string, channelNum: number): string | null {
   if (!fs.existsSync(baseDir)) return null;
@@ -119,6 +120,7 @@ function findVideoFileForVehicleChannel(unitNumber: string, channelNum: number, 
 
 async function startServer() {
   const app = express();
+  app.set('trust proxy', 'loopback');
   app.use(express.json());
 
   app.use((req, res, next) => {
@@ -152,8 +154,9 @@ async function startServer() {
     res.sendFile(path.join(APK_VERSIONS_DIR, file));
   });
 
-  await initDbPool();
-  await ensureTrackerEventsTable().catch(() => {});
+  if (!await initDbPool()) throw new Error('No se pudo conectar al CMS local');
+  if (!await ensureTrackerEventsTable()) throw new Error('No se pudo preparar la base de eventos');
+  if (await ensureDispatchSchedules() === null) throw new Error('No se pudo preparar la base de despachos');
   startTelemetrySimulation();
 
   app.get('/api/health', (req, res) => {
@@ -184,46 +187,17 @@ async function startServer() {
     });
   });
 
-  app.post('/api/test-db', async (req, res) => {
-    const result = await testConnectionAndSchema();
-    res.json(result);
-  });
-
   app.post('/api/auth/login', async (req, res) => {
     try {
-      const { username, password } = req.body;
-      if (!username || !password) return res.json({ code: 201, error: 'Missing credentials' });
-
-      if (isDbConnected()) {
-        try {
-          const sha1pwd = crypto.createHash('sha1').update(password).digest('hex').toUpperCase();
-          const despwd = desEncrypt(password);
-          const rows = await executeQuery<any>(
-            'SELECT a.id, b.roleid, a.username AS account, a.validend FROM registerlogin AS a INNER JOIN userinfo AS b ON a.id = b.registerloginid WHERE a.username = ? AND (a.userpassword = ? OR a.userpassword = ?)',
-            [username, sha1pwd, despwd]
-          );
-          if (rows && rows.length > 0) {
-            const user = rows[0];
-            if (user.validend) {
-              const now = new Date();
-              const ve = new Date(user.validend + ' 23:59:59');
-              if (ve.getTime() - now.getTime() < 0) {
-                return res.json({ code: 206, result: false, error: 'Cuenta expirada' });
-              }
-            }
-            const token = jwt.sign({ uid: user.id, rid: user.roleid, un: user.account }, JWT_SECRET, { expiresIn: '24h' });
-            return res.json({ code: 200, result: true, token, user: { uid: user.id, account: user.account, roleid: user.roleid } });
-          }
-        } catch (e: any) {
-          console.error('[Login] Consulta real de Ceiba falló:', e.message);
-          return res.status(503).json({ code: 503, result: false, error: 'Servidor Ceiba II no disponible' });
-        }
-      }
-      return res.status(401).json({ code: 401, result: false, error: 'Credenciales inválidas' });
-    } catch (err: any) {
-      console.error('Login error:', err);
-      return res.json({ code: 202, error: err.message });
-    }
+      const upstream = await fetch(downloaderBase + '/api/auth/login', {
+        method: 'POST', headers: { 'content-type': 'application/json', 'x-forwarded-for': req.ip || '127.0.0.1' },
+        body: JSON.stringify(req.body), signal: AbortSignal.timeout(10000)
+      });
+      const body = await upstream.json();
+      if (!upstream.ok || body.code !== 200) return res.status(upstream.status).json({ ...body, result: false });
+      return res.json({ code: 200, result: true, token: body.token,
+        user: { uid: body.user.uid, roleid: body.user.rid, account: body.user.account } });
+    } catch { return res.status(503).json({ code: 503, result: false, error: 'El CMS no esta disponible' }); }
   });
 
   app.get('/api/auth/verify', (req, res) => {
@@ -244,48 +218,27 @@ async function startServer() {
   }
 
   async function getAuthorizedDeviceIds(uid: number, rid: number): Promise<Set<string> | null> {
-    const cacheKey = `${uid}:${rid}`;
-    const cached = AUTHORIZED_DEVICE_CACHE.get(cacheKey);
-    if (cached && cached.expires > Date.now()) return cached.ids;
-    const rows = await executeQuery<any>('SELECT deviceid FROM vehicledevice WHERE deviceid IS NOT NULL AND deviceid <> ""');
-    if (!rows) return null;
-    const all = rows.map(row => String(row.deviceid));
-    if (rid === 1) {
-      const ids = new Set<string>(all);
-      AUTHORIZED_DEVICE_CACHE.set(cacheKey, { expires: Date.now() + 10000, ids });
-      return ids;
-    }
-    try {
-      const response = await fetch(`http://127.0.0.1:${process.env.CEIBA_WEB_API_JAVA_PORT || '12046'}/api/v2/basic/power/device`, {
-        method: 'POST',
-        headers: { key: wcmsLiveToken(uid, rid), 'content-type': 'application/json' },
-        body: JSON.stringify({ terid: all }),
-        signal: AbortSignal.timeout(5000)
-      });
-      const data: any = await response.json();
-      if (!response.ok || data.errorcode !== 200 || !Array.isArray(data.data)) return null;
-      const ids = new Set<string>(data.data.map((item: unknown) => String(item)));
-      AUTHORIZED_DEVICE_CACHE.set(cacheKey, { expires: Date.now() + 10000, ids });
-      return ids;
-    } catch {
-      return null;
-    }
+    try { return new Set((await getDownloaderVehicles(uid, rid, JWT_SECRET)).map(v => v.deviceno)); }
+    catch { return null; }
   }
 
   async function getAuthorizedVehicles(req: express.Request) {
-    const token = readAuthToken(req);
-    if (!token) return null;
     try {
-      const payload: any = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] });
-      const ids = await getAuthorizedDeviceIds(Number(payload.uid), Number(payload.rid));
-      if (!ids) return null;
-      const vehicles = await getVehicles();
-      const rows = await executeQuery<any>('SELECT id, deviceid FROM vehicledevice WHERE deviceid IS NOT NULL');
-      const allowedIds = new Set((rows || []).filter(row => ids.has(String(row.deviceid))).map(row => String(row.id)));
-      return vehicles.filter(vehicle => allowedIds.has(String(vehicle.id)));
-    } catch {
-      return null;
-    }
+      const payload: any = jwt.verify(readAuthToken(req), JWT_SECRET, { algorithms: ['HS256'] });
+      const permitted = await getDownloaderVehicles(Number(payload.uid), Number(payload.rid), JWT_SECRET);
+      const byId = new Map(permitted.map(v => [String(v.id), v]));
+      return (await getVehicles()).flatMap(vehicle => {
+        const permission = byId.get(String(vehicle.id));
+        if (!permission) return [];
+        const channels = permission.channels.map(c => vehicle.channels.find(v => v.channelNumber === Number(c.id)) || {
+          id: Number(c.id), channelNumber: Number(c.id), name: c.name || `Camara ${c.id}`,
+          status: vehicle.status === 'offline' ? 'offline' as const : 'buffering' as const,
+          resolution: '', fps: 0, bitrate: '',
+        });
+        return [{ ...vehicle, channels, camerasTotal: channels.length,
+          camerasOnline: `${vehicle.status === 'offline' ? 'MDVR desconectado' : 'MDVR conectado'} · ${channels.length} canales autorizados` }];
+      });
+    } catch { return null; }
   }
 
   async function requireAppAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
@@ -313,11 +266,13 @@ async function startServer() {
       res.status(503).json({ error: 'No se pudieron consultar los permisos de Ceiba II' });
       return null;
     }
+    res.locals.authorizedVehicleIds = vehicles.map(vehicle => String(vehicle.id));
     return new Set(vehicles.map(vehicle => vehicle.unitNumber));
   }
 
   async function ensureDispatchSchedules() {
-    return executeQuery(`CREATE TABLE IF NOT EXISTS dispatch_schedules (
+    if (dispatchSchedulesReady) return [];
+    const result = await executeQuery(`CREATE TABLE IF NOT EXISTS dispatch_schedules (
       id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
       vehicle_id VARCHAR(64) NOT NULL,
       unit_number VARCHAR(64) NOT NULL,
@@ -329,6 +284,8 @@ async function startServer() {
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       INDEX idx_dispatch_schedule_unit_due (unit_number, due_at)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
+    dispatchSchedulesReady = result !== null;
+    return result;
   }
   app.get('/api/dispatch/fences', async (_req, res) => {
     try { res.json((await getGeofences()).map(fence => ({ id: fence.id, name: fence.name }))); }
@@ -361,20 +318,21 @@ async function startServer() {
     const date = String(req.query.date || '');
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: 'Fecha invalida' });
     if (await ensureDispatchSchedules() === null) return res.status(503).json({ error: 'Programacion no disponible' });
-    const rows = await executeQuery<any>(`SELECT id, fence_name, DATE_FORMAT(due_at, '%Y-%m-%d %H:%i:%s') AS due_at, rate FROM dispatch_schedules WHERE unit_number = ? AND due_at >= ? AND due_at < DATE_ADD(?, INTERVAL 1 DAY) ORDER BY due_at`,
-      [vehicle.unitNumber, date + ' 00:00:00', date + ' 00:00:00']);
+    const rows = await executeQuery<any>(`SELECT id, fence_name, DATE_FORMAT(due_at, '%Y-%m-%d %H:%i:%s') AS due_at, rate FROM dispatch_schedules WHERE vehicle_id = ? AND due_at >= ? AND due_at < DATE_ADD(?, INTERVAL 1 DAY) ORDER BY due_at`,
+      [vehicle.id, date + ' 00:00:00', date + ' 00:00:00']);
     if (rows === null) return res.status(503).json({ error: 'No se pudo leer la programacion' });
     const schedules = await Promise.all(rows.map(async row => {
       const due = String(row.due_at);
-      const crossing = await executeQuery<any>(`SELECT DATE_FORMAT(event_time, '%Y-%m-%d %H:%i:%s') AS event_time FROM tracker_events WHERE unit_number = ? AND event_type = 'geofence_entry'
-        AND JSON_UNQUOTE(JSON_EXTRACT(meta, '$.to')) = ? AND event_time BETWEEN DATE_SUB(?, INTERVAL 30 MINUTE)
-        AND DATE_ADD(?, INTERVAL 24 HOUR) ORDER BY event_time ASC LIMIT 1`,
-        [vehicle.unitNumber, row.fence_name, due, due]);
-      const arrived = crossing?.[0]?.event_time || null;
+      const crossings = await executeQuery<any>(`SELECT DATE_FORMAT(event_time, '%Y-%m-%d %H:%i:%s') AS event_time, meta FROM tracker_events WHERE vehicle_id = ? AND event_type = 'geofence_entry'
+        AND event_time BETWEEN DATE_SUB(?, INTERVAL 30 MINUTE) AND DATE_ADD(?, INTERVAL 24 HOUR) ORDER BY event_time ASC`, [vehicle.id, due, due]);
+      if (crossings === null) throw new Error('No se pudieron consultar los eventos');
+      const crossing = crossings.find(event => { try { return JSON.parse(event.meta || '{}').to === row.fence_name; } catch { return false; } });
+      const arrived = crossing?.event_time || null;
       const arrival = arrived ? String(arrived) : null;
       const delayMinutes = arrival ? Math.max(0, Math.ceil((Date.parse(arrival.replace(' ', 'T') + '-05:00') - Date.parse(due.replace(' ', 'T') + '-05:00')) / 60000)) : null;
       return { id: row.id, fenceName: row.fence_name, dueAt: due, arrival, delayMinutes, rate: Number(row.rate), fine: delayMinutes == null ? 0 : Math.round(delayMinutes * Number(row.rate) * 100) / 100 };
-    }));
+    })).catch(() => null);
+    if (!schedules) return res.status(503).json({ error: 'No se pudo consultar la programacion' });
     return res.json({ schedules });
   });
 
@@ -387,56 +345,8 @@ async function startServer() {
     if (!vehicles) return res.status(503).json({ error: 'No se pudieron consultar los permisos de Ceiba II' });
     const vehicle = vehicles.find(item => String(item.id) === vehicleId);
     if (!vehicle) return res.status(403).json({ error: 'Sin permiso para esta unidad' });
-    const plate = vehicle.unitNumber.split('_').pop()?.toUpperCase();
-    if (!plate) return res.status(422).json({ error: 'La unidad no tiene placa registrada' });
-    try {
-      const rows: any[] = [];
-      for (let page = 1; page <= 20; page++) {
-        const params = new URLSearchParams({ page: String(page), pageSize: '500', bus: plate, fechaDesde: date, fechaHasta: date });
-        const upstream = await fetch('http://127.0.0.1:8080/api/v1/registrosvueltas/detalle?' + params, { signal: AbortSignal.timeout(12000) });
-        if (!upstream.ok) throw new Error('Reporte de despachos no disponible');
-        const body: any = await upstream.json();
-        if (!Array.isArray(body.data)) throw new Error('Formato de reporte inesperado');
-        rows.push(...body.data.filter((row: any) =>
-          String(row.codigoBus || '').toUpperCase() === plate &&
-          String(row.codigoCompleto || '').toUpperCase() === vehicle.unitNumber.toUpperCase() &&
-          String(row.fecha || '').slice(0, 10) === date
-        ));
-        if (page * 500 >= Number(body.total || 0) || body.data.length < 500) break;
-        if (page === 20) throw new Error('El reporte excede el límite de registros; consulte una fecha más reciente');
-      }
-      const groups = new Map<string, any[]>();
-      for (const row of rows) {
-        const key = String(row.idVuelta || row.idRegistro);
-        if (!groups.has(key)) groups.set(key, []);
-        groups.get(key)!.push(row);
-      }
-      const report = Array.from(groups, ([id, details]) => {
-        details.sort((a, b) => String(a.eventTime || '').localeCompare(String(b.eventTime || '')));
-        const first = details[0];
-        const last = details[details.length - 1];
-        const time = (value: any) => value ? new Date(value).toLocaleTimeString('es-EC', { timeZone: 'America/Guayaquil', hour12: false }) : null;
-        const fines = details.reduce((sum, row) => sum + Number(row.multa || 0) + Number(row.multa2 || 0) + Number(row.multa3 || 0), 0);
-        return {
-          id, route: first.nombreRuta || 'Ruta sin nombre',
-          start: first.horaSalida || time(first.fechaDespacho || first.eventTime),
-          end: first.estadoVuelta === 'EN_CURSO' ? null : time(last.eventTime),
-          status: first.estadoVuelta || 'SIN ESTADO',
-          fine: Math.round(fines * 100) / 100,
-          points: details.map(row => ({
-            name: row.nombrePunto || 'Punto sin nombre', event: row.tipoEvento || null,
-            time: time(row.eventTime), expected: row.horaDebeLlegar || null,
-            arrival: row.llego || null, difference: row.diferencia ?? null,
-            fine: Number(row.multa || 0) + Number(row.multa2 || 0) + Number(row.multa3 || 0),
-            lat: Number(row.latitud), lng: Number(row.longitud)
-          }))
-        };
-      });
-      report.sort((a, b) => String(a.start).localeCompare(String(b.start)));
-      res.json({ unitNumber: vehicle.unitNumber, date, report });
-    } catch (error: any) {
-      res.status(502).json({ error: error.message || 'No se pudo obtener el reporte' });
-    }
+    try { res.json({ unitNumber: vehicle.unitNumber, date, report: await getNationalDispatchReport(vehicle, date) }); }
+    catch { res.status(502).json({ error: 'No se pudo consultar el historial de geocercas del CMS' }); }
   });
 
   // Historical positions come from the CMS GPS archive, never from mock-data.
@@ -705,7 +615,8 @@ async function startServer() {
     const vehicles = await getAuthorizedVehicles(req);
     const vehicle = vehicles?.find(item => String(item.id) === String(req.params.id));
     if (!vehicle) return res.status(404).json({ error: 'Vehículo no encontrado' });
-    const ch = parseInt(req.params.channel, 10) || 1;
+    const ch = Number(req.params.channel);
+    if (!Number.isInteger(ch) || !vehicle.channels.some(c => c.channelNumber === ch)) return res.status(403).json({ error: 'Canal sin permiso' });
     try {
       const videoPath = findVideoFileForVehicleChannel(vehicle.unitNumber, ch, Number(res.locals.auth?.rid) === 1);
       if (!videoPath || !fs.existsSync(videoPath)) {
@@ -771,7 +682,7 @@ async function startServer() {
       JWT_SECRET,
       { algorithm: 'HS256', expiresIn: '2m' }
     );
-    const flvUrl = `${liveUrl}?audio=${requestAudio ? '1' : '0'}&stream=${streamType}&access_token=${encodeURIComponent(streamToken)}`;
+    const flvUrl = `${publicPath}${liveUrl}?audio=${requestAudio ? '1' : '0'}&stream=${streamType}&access_token=${encodeURIComponent(streamToken)}`;
 
     res.json({
       vehicleId: vehicle.id,
@@ -788,7 +699,7 @@ async function startServer() {
     });
   });
 
-  app.get('/api/geofences', adminOnly, async (_req, res) => {
+  app.get('/api/geofences', async (_req, res) => {
     try { res.json(await getGeofences()); }
     catch { res.status(503).json({ error: 'No se pudieron cargar las geocercas' }); }
   });
@@ -818,6 +729,8 @@ async function startServer() {
       const params: any[] = [];
       let sql = 'SELECT id, vehicle_id, unit_number, plate, event_type, title, description, event_time, lat, lng, speed, source, meta FROM tracker_events WHERE unit_number IN (' + Array.from(units).map(() => '?').join(',') + ')';
       params.push(...units);
+      sql += ' AND vehicle_id IN (' + res.locals.authorizedVehicleIds.map(() => '?').join(',') + ')';
+      params.push(...res.locals.authorizedVehicleIds);
       if (geofencesOnly) sql += " AND event_type IN ('geofence_entry', 'geofence_exit')";
       if (Number.isSafeInteger(beforeId) && beforeId > 0) { sql += ' AND id < ?'; params.push(beforeId); }
       if (query) {
@@ -879,6 +792,8 @@ async function startServer() {
       const params: any[] = [from, to];
       let sql = 'SELECT unit_number, plate, event_type, title, description, event_time, lat, lng, speed, source FROM tracker_events WHERE event_time BETWEEN ? AND ? AND unit_number IN (' + Array.from(units).map(() => '?').join(',') + ')';
       params.push(...units);
+      sql += ' AND vehicle_id IN (' + res.locals.authorizedVehicleIds.map(() => '?').join(',') + ')';
+      params.push(...res.locals.authorizedVehicleIds);
       if (unit) {
         sql += ' AND unit_number = ?';
         params.push(unit);
@@ -923,8 +838,8 @@ async function startServer() {
   });
 
   async function proxyTo12058(req: express.Request, res: express.Response) {
-    if (Number(res.locals.auth?.rid) !== 1) return res.status(403).json({ error: 'Solo el administrador puede acceder al descargador' });
-    const targetUrl = `http://127.0.0.1:12058${req.originalUrl}`;
+
+    const targetUrl = `${downloaderBase}${req.originalUrl}`;
     try {
       const headers: Record<string, string> = {};
       if (req.headers.authorization) headers['Authorization'] = req.headers.authorization as string;
@@ -948,18 +863,7 @@ async function startServer() {
       const ar = proxied.headers.get('accept-ranges');
       if (ar) res.setHeader('Accept-Ranges', ar);
       const contentType = ct || '';
-      if (contentType.includes('video') || contentType.includes('octet-stream') || proxied.headers.get('content-disposition')) {
-        const buf = Buffer.from(await proxied.arrayBuffer());
-        res.send(buf);
-      } else {
-        const text = await proxied.text();
-        try {
-          const json = JSON.parse(text);
-          res.json(json);
-        } catch {
-          res.send(text);
-        }
-      }
+      if (proxied.body) Readable.fromWeb(proxied.body as any).pipe(res); else res.end();
     } catch (e: any) {
       console.error('[Proxy 12058] error:', e.message);
       res.status(502).json({ code: 502, error: 'Proxy to 12058 failed: ' + e.message });
@@ -967,7 +871,7 @@ async function startServer() {
   }
 
   // Isolated API namespace used only by the copied downloader UI.
-  app.use('/downloader-api', requireAppAuth, adminOnly, async (req, res) => {
+  app.use('/downloader-api', requireAppAuth, async (req, res) => {
     const targetUrl = `http://127.0.0.1:12058${req.originalUrl.replace(/^\/downloader-api/, '')}`;
     try {
       const headers: Record<string, string> = {};
@@ -1007,51 +911,6 @@ async function startServer() {
   app.delete('/api/download/task', async (req, res) => { await proxyTo12058(req, res); });
   app.post('/api/download/task', async (req, res) => { await proxyTo12058(req, res); });
 
-  async function proxyToMiritrans(req: express.Request, res: express.Response) {
-    if (Number(res.locals.auth?.rid) !== 1) return res.status(403).json({ error: 'Sin permisos para este módulo' });
-    const targetUrl = `http://127.0.0.1:8080${req.originalUrl}`;
-    try {
-      const headers: Record<string, string> = {};
-      if (req.headers.authorization) headers['Authorization'] = req.headers.authorization as string;
-      if (req.headers['content-type']) headers['Content-Type'] = req.headers['content-type'] as string;
-      const fetchOpts: any = { method: req.method, headers };
-      if (req.method !== 'GET' && req.method !== 'HEAD' && req.body && Object.keys(req.body).length > 0) {
-        if (!headers['Content-Type']) headers['Content-Type'] = 'application/json';
-        fetchOpts.body = JSON.stringify(req.body);
-      }
-      const proxied = await fetch(targetUrl, fetchOpts);
-      res.status(proxied.status);
-      const ct = proxied.headers.get('content-type');
-      if (ct) res.setHeader('Content-Type', ct);
-      const text = await proxied.text();
-      try {
-        const json = JSON.parse(text);
-        res.json(json);
-      } catch {
-        res.send(text);
-      }
-    } catch (e: any) {
-      console.error('[Proxy 8080] error:', e.message);
-      res.status(502).json({ code: 502, error: 'Proxy to 8080 failed: ' + e.message });
-    }
-  }
-
-  app.get('/api/v1/buses', async (req, res) => { await proxyToMiritrans(req, res); });
-  app.get('/api/v1/rutas', async (req, res) => { await proxyToMiritrans(req, res); });
-  app.get('/api/v1/puntos', async (req, res) => { await proxyToMiritrans(req, res); });
-  app.get('/api/v1/puntos/detalle', async (req, res) => { await proxyToMiritrans(req, res); });
-  app.get('/api/v1/puntos/ruta/:id', async (req, res) => { await proxyToMiritrans(req, res); });
-  app.get('/api/v1/registrosvueltas/detalle', async (req, res) => { await proxyToMiritrans(req, res); });
-  app.get('/api/v1/registrosvueltas/vueltas', async (req, res) => { await proxyToMiritrans(req, res); });
-  app.get('/api/v1/registrosvueltas/total', async (req, res) => { await proxyToMiritrans(req, res); });
-  app.get('/api/v1/despacho', async (req, res) => { await proxyToMiritrans(req, res); });
-  app.post('/api/v1/despacho', async (req, res) => { await proxyToMiritrans(req, res); });
-  app.get('/api/v1/sindespacho', async (req, res) => { await proxyToMiritrans(req, res); });
-  app.get('/api/ceiba/fences', async (req, res) => { await proxyToMiritrans(req, res); });
-  app.get('/api/ceiba/gps', async (req, res) => { await proxyToMiritrans(req, res); });
-  app.get('/api/ceiba/gps-stream', async (req, res) => { await proxyToMiritrans(req, res); });
-  app.get('/api/ceiba/ping', async (req, res) => { await proxyToMiritrans(req, res); });
-
   app.get('/api/stream/telemetry', requireAppAuth, async (req, res) => {
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
@@ -1088,6 +947,7 @@ async function startServer() {
   app.use('/api', (_req, res) => res.status(404).json({ error: 'Endpoint API no encontrado' }));
 
   if (process.env.NODE_ENV !== 'production') {
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
@@ -1101,7 +961,7 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
+  app.listen(PORT, process.env.BIND_HOST || '127.0.0.1', () => {
     console.log(`[CustomServiciosRS Server] Telematics & Video Gateway running on http://0.0.0.0:${PORT}`);
   });
   if (PORT_ALIAS > 0 && PORT_ALIAS !== PORT) {
