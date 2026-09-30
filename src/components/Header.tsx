@@ -15,7 +15,7 @@ export const Header: React.FC<{
       </span>
     </div>
     <div className="flex items-center space-x-2">
-      <button onClick={onOpenSettings} className="w-8 h-8 rounded-full bg-slate-800/60 flex items-center justify-center border border-[#293a50]" aria-label="Configuración">
+      <button onClick={onOpenSettings} className="w-8 h-8 rounded-full bg-slate-800/60 flex items-center justify-center border border-[#293a50]" aria-label="Opciones de cuenta">
         <Settings className="w-4 h-4" />
       </button>
       <button onClick={onOpenSettings} className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center text-white border border-[#293a50]" aria-label="Cuenta">

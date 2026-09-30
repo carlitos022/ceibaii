@@ -87,8 +87,10 @@ export default function App() {
   const [showLogin, setShowLogin] = useState(false);
   const [loginError, setLoginError] = useState('');
   const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const loginEpoch = useRef(0);
 
   const handleLogout = () => {
+    loginEpoch.current += 1;
     localStorage.removeItem('csrs_auth');
     setAuth({ user: null, token: null });
     setIsSettingsModalOpen(false);
@@ -109,9 +111,11 @@ export default function App() {
       try {
         const parsed = JSON.parse(stored);
         if (parsed.token && parsed.user) {
-          setAuth(parsed);
+          const claim = JSON.parse(atob(parsed.token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+          if (Number(claim.exp) * 1000 > Date.now()) setAuth(parsed);
+          else { localStorage.removeItem('csrs_auth'); setLoginError('Su sesion vencio. Inicie sesion nuevamente.'); }
         }
-      } catch (e) {}
+      } catch (e) { localStorage.removeItem('csrs_auth'); }
     }
   }, []);
 
@@ -181,6 +185,7 @@ export default function App() {
       const libData = normalizeArray<LibraryRecord>(libRaw, []);
       const dlData = normalizeArray<DownloadJob>(dlRaw, []);
 
+      if (JSON.parse(localStorage.getItem('csrs_auth') || '{}').token !== token) return;
       setVehicles(vehData);
       setGeofences(geoData);
       setAlerts(altData);
@@ -212,6 +217,7 @@ export default function App() {
 
     eventSource.onmessage = (event) => {
       try {
+        if (JSON.parse(localStorage.getItem('csrs_auth') || '{}').token !== auth.token) return;
         const data = JSON.parse(event.data);
         if (data.type === 'telemetry_update' && Array.isArray(data.vehicles)) {
           lastTelemetryAt = Date.now();
@@ -242,9 +248,11 @@ export default function App() {
 
   const handleLogin = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    if (isLoggingIn) return;
+    const attempt = ++loginEpoch.current;
     const formData = new FormData(e.currentTarget);
     const username = (formData.get('username') as string || '').trim();
-    const password = (formData.get('password') as string || '').trim();
+    const password = (formData.get('password') as string || '');
 
     if (!username || !password) return;
     setIsLoggingIn(true);
@@ -254,9 +262,11 @@ export default function App() {
       const res = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password })
+        body: JSON.stringify({ username, password }),
+        signal: AbortSignal.timeout(20000)
       });
       const data = await res.json().catch(() => null);
+      if (attempt !== loginEpoch.current) return;
       // Old backend: {code:200, result:true, token, user:{uid,account}}  New backend: {code:200, token, user, result}
       const isSuccess = data && data.code === 200 && data.token && (data.result || data.user);
       if (isSuccess) {
@@ -269,9 +279,9 @@ export default function App() {
       }
       setLoginError((data && (data.error || data.errorcase)) || 'Credenciales inválidas');
     } catch (e) {
-      setLoginError('No se pudo conectar con Ceiba II');
+      if (attempt === loginEpoch.current) setLoginError('No se pudo conectar con Ceiba II. Intente nuevamente.');
     } finally {
-      setIsLoggingIn(false);
+      if (attempt === loginEpoch.current) setIsLoggingIn(false);
     }
   };
 
@@ -660,6 +670,10 @@ export default function App() {
         isOpen={isSettingsModalOpen}
         onClose={() => setIsSettingsModalOpen(false)}
         onLogout={handleLogout}
+        token={auth.token}
+        account={auth.user?.account || auth.user?.un}
+        unitsCount={vehicles.length}
+        isAdministrator={Number(auth.user?.roleid ?? auth.user?.rid) === 1}
       />
 
       {!embeddedVivo && <BottomNavBar activeTab={activeTab} onTabChange={setActiveTab} />}

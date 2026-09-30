@@ -1,189 +1,65 @@
-import React, { useState, useEffect } from 'react';
-import { X, Database, Server, CheckCircle2, AlertTriangle, RefreshCw, Cpu, BookOpen, LogOut } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { X, UserRound, Pencil, LogOut, Check, LoaderCircle } from 'lucide-react';
+import { createPortal } from 'react-dom';
 
-interface SettingsModalProps {
-  isOpen: boolean;
-  onClose: () => void;
-  onLogout: () => void;
-}
-
-export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, onLogout }) => {
-  const [healthData, setHealthData] = useState<any>(null);
-  const [testingDb, setTestingDb] = useState(false);
-  const [testResult, setTestResult] = useState<any>(null);
-
-  const fetchHealth = async () => {
-    try {
-      const res = await fetch('/api/health');
-      const data = await res.json();
-      setHealthData(data);
-    } catch (e) {
-      console.error(e);
-    }
-  };
-
+type Profile = { firstName: string; lastName: string; nationalId: string; ownerName: string };
+const empty: Profile = { firstName: '', lastName: '', nationalId: '', ownerName: '' };
+const labels: Record<keyof Profile, string> = { firstName: 'Nombres', lastName: 'Apellidos', nationalId: 'Cedula', ownerName: 'Propietario de las unidades' };
+interface Props { isOpen: boolean; onClose: () => void; onLogout: () => void; token: string | null; account?: string; unitsCount: number; isAdministrator: boolean }
+export const SettingsModal: React.FC<Props> = ({ isOpen, onClose, onLogout, token, account, unitsCount, isAdministrator }) => {
+  const [profile, setProfile] = useState<Profile>(empty);
+  const [draft, setDraft] = useState<Profile>(empty);
+  const [accountName, setAccountName] = useState(account || '');
+  const [loading, setLoading] = useState(true);
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [saved, setSaved] = useState(false);
   useEffect(() => {
-    if (isOpen) {
-      fetchHealth();
-    }
-  }, [isOpen]);
-
-  const handleTestConnection = async () => {
-    setTestingDb(true);
+    if (!isOpen || !token) return;
+    const controller = new AbortController();
+    setProfile(empty); setDraft(empty); setAccountName(account || ''); setLoading(true); setEditing(false); setError(''); setSaved(false);
+    fetch('/api/account/profile', { headers: { Authorization: 'Bearer ' + token }, signal: controller.signal, cache: 'no-store' })
+      .then(async response => { const data = await response.json(); if (!response.ok) throw Error(data.error || 'No se pudo cargar su perfil'); if (controller.signal.aborted) return; setProfile(data.profile); setDraft(data.profile); setAccountName(data.account); })
+      .catch(error => { if (!controller.signal.aborted) setError(error.message); })
+      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
+    return () => controller.abort();
+  }, [isOpen, token]);
+  const save = async (event: React.FormEvent) => {
+    event.preventDefault(); if (saving) return;
+    setSaving(true); setError(''); setSaved(false);
     try {
-      const res = await fetch('/api/test-db', { method: 'POST' });
-      const data = await res.json();
-      setTestResult(data);
-      await fetchHealth();
-    } catch (e: any) {
-      setTestResult({ success: false, error: e.message });
-    } finally {
-      setTestingDb(false);
-    }
+      const response = await fetch('/api/account/profile', { method: 'PUT', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body: JSON.stringify(draft) });
+      const data = await response.json(); if (!response.ok) throw Error(data.error || 'No se pudo guardar');
+      setProfile(data.profile); setDraft(data.profile); setEditing(false); setSaved(true);
+    } catch (error: any) { setError(error.message || 'No se pudo guardar'); }
+    finally { setSaving(false); }
   };
-
   if (!isOpen) return null;
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm select-none">
-      <div className="bg-[#000f20] border border-[#293a50] rounded-2xl w-full max-w-xl overflow-hidden shadow-2xl animate-in zoom-in-95 flex flex-col max-h-[90vh]">
-        {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b border-[#293a50] bg-[#011428]">
-          <div className="flex items-center space-x-2.5">
-            <div className="w-8 h-8 rounded-lg bg-[#00d1ff]/10 border border-[#00d1ff]/30 flex items-center justify-center">
-              <Server className="w-5 h-5 text-[#00d1ff]" />
-            </div>
-            <div>
-              <h2 className="font-mono font-bold text-white text-base leading-tight">
-                Configuración & Diagnóstico Ceiba II / MySQL
-              </h2>
-              <span className="text-[10px] text-slate-400 font-mono">
-                Servidor Local Windows • CustomServiciosRS
-              </span>
-            </div>
-          </div>
-
-          <button
-            onClick={onClose}
-            className="p-1.5 text-slate-400 hover:text-white bg-slate-800/60 rounded-full transition-colors cursor-pointer"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        {/* Body */}
-        <div className="p-4 overflow-y-auto custom-scrollbar space-y-4 text-xs">
-          {/* Status Indicator Card */}
-          <div className="p-3.5 rounded-xl bg-[#011428] border border-[#293a50] flex items-center justify-between">
-            <div className="flex items-center space-x-3">
-              <div className="p-2 rounded-lg bg-slate-900 border border-[#293a50]">
-                <Database className="w-5 h-5 text-[#00d1ff]" />
-              </div>
-              <div>
-                <div className="flex items-center space-x-2">
-                  <span className="text-white font-bold font-mono text-sm">Estado Base de Datos MySQL:</span>
-                  {healthData?.database?.connected ? (
-                    <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-emerald-950 text-emerald-400 border border-emerald-800 font-bold">
-                      CONECTADO A WINDOWS
-                    </span>
-                  ) : (
-                    <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-[#00d1ff]/10 text-[#00d1ff] border border-[#00d1ff]/30 font-bold">
-                      MODO SIMULACIÓN ACTIVO (REDUNDANTE)
-                    </span>
-                  )}
-                </div>
-                <div className="text-[11px] font-mono text-slate-400 mt-1">
-                  Host: {healthData?.database?.host}:{healthData?.database?.port} • Base: {healthData?.database?.db}
-                </div>
-              </div>
-            </div>
-
-            <button
-              onClick={handleTestConnection}
-              disabled={testingDb}
-              className="flex items-center space-x-1 px-3 py-2 rounded-lg bg-[#00d1ff] hover:bg-[#4cd6ff] text-black font-bold font-mono text-xs transition-all shadow-[0_0_12px_rgba(0,209,255,0.4)] cursor-pointer disabled:opacity-50"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${testingDb ? 'animate-spin' : ''}`} />
-              <span>{testingDb ? 'Probando...' : 'Probar Conexión'}</span>
-            </button>
-          </div>
-
-          {/* Test Results */}
-          {testResult && (
-            <div className={`p-3 rounded-xl border font-mono text-xs ${
-              testResult.success
-                ? 'bg-emerald-950/40 border-emerald-500/50 text-emerald-300'
-                : 'bg-amber-950/40 border-amber-500/50 text-amber-300'
-            }`}>
-              <div className="flex items-center space-x-2 font-bold mb-1">
-                {testResult.success ? <CheckCircle2 className="w-4 h-4 text-emerald-400" /> : <AlertTriangle className="w-4 h-4 text-amber-400" />}
-                <span>
-                  {testResult.success ? 'Conexión a MySQL Exitosa' : 'Servidor MySQL Local No Encontrado'}
-                </span>
-              </div>
-              <p className="text-[11px] text-slate-300 mt-1">
-                {testResult.success
-                  ? `Latencia: ${testResult.latencyMs}ms. Se detectaron tablas en la base de datos ${testResult.config.database}.`
-                  : `Para conectar con tu servidor Ceiba II en Windows, asegúrate de configurar las variables en el archivo .env (MYSQL_HOST, MYSQL_USER, MYSQL_PASSWORD, MYSQL_DATABASE). Mientras tanto, el backend opera en modo simulación de alta fidelidad.`}
-              </p>
-            </div>
-          )}
-
-          {/* Ceiba II Gateway Config Info */}
-          <div>
-            <h3 className="text-[11px] font-mono uppercase tracking-wider text-slate-400 mb-2 flex items-center space-x-1.5">
-              <Cpu className="w-4 h-4 text-[#00d1ff]" />
-              <span>Puertos & Servicios Ceiba II / Streamax</span>
-            </h3>
-            <div className="bg-slate-900/80 p-3 rounded-lg border border-[#293a50]/60 space-y-2 font-mono text-[11px]">
-              <div className="flex justify-between">
-                <span className="text-slate-400">Gateway API HTTP (CMSV6):</span>
-                <span className="text-white">Puerto 8080 (REST API)</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-400">Media Gateway (Video RTSP/FLV):</span>
-                <span className="text-[#00d1ff]">Puerto 1078 / 6605</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-400">Servidor MySQL (ceiba2_db):</span>
-                <span className="text-emerald-400">Puerto 3306</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-400">Protocolo Telemetría:</span>
-                <span className="text-slate-200">JT/T 808 & JT/T 1078 MDVR</span>
-              </div>
-            </div>
-          </div>
-
-          {/* AI Agent Integration Guide Box */}
-          <div className="p-3.5 rounded-xl bg-[#011428] border border-[#293a50] space-y-2">
-            <div className="flex items-center space-x-2 text-[#00d1ff] font-mono font-bold">
-              <BookOpen className="w-4 h-4" />
-              <span>Documentación de Integración para el Agente IA</span>
-            </div>
-            <p className="text-slate-300 text-xs leading-relaxed">
-              El archivo <span className="text-[#00d1ff] font-mono bg-slate-900 px-1 py-0.5 rounded">CEIBA_II_INTEGRATION.md</span> en la raíz del proyecto contiene el script SQL DDL completo de las tablas de MySQL y ejemplos en Python/Node.js para que tu agente IA automatice consultas de telemetría, alarmas ADAS/DSM y solicitudes de video.
-            </p>
-          </div>
-        </div>
-
-        {/* Footer */}
-        <div className="p-3 border-t border-[#293a50] bg-[#011428] flex items-center justify-between gap-3">
-          <button
-            onClick={onLogout}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-red-950/60 hover:bg-red-900/80 text-red-300 border border-red-800/70 font-mono text-xs font-bold transition-all cursor-pointer"
-          >
-            <LogOut className="w-4 h-4" />
-            <span>Salir / Cambiar usuario</span>
-          </button>
-          <button
-            onClick={onClose}
-            className="px-4 py-2 rounded-lg bg-[#00d1ff] hover:bg-[#4cd6ff] text-black font-mono text-xs font-bold transition-all shadow-[0_0_12px_rgba(0,209,255,0.4)] cursor-pointer"
-          >
-            Aceptar
-          </button>
-        </div>
+  const filled = (Object.keys(labels) as (keyof Profile)[]).filter(key => profile[key]);
+  return createPortal(<div className="fixed inset-0 z-[2000] bg-black/75 flex items-center justify-center p-3 sm:p-5" onClick={() => { if (!saving) onClose(); }}>
+    <section role="dialog" aria-modal="true" aria-label="Mi cuenta" className="w-full max-w-lg max-h-[calc(100dvh-1.5rem)] rounded-2xl bg-[#071626] border border-[#34546a] text-slate-200 flex flex-col overflow-hidden shadow-2xl" onClick={event => event.stopPropagation()}>
+      <div className="p-5 border-b border-[#293a50] flex items-start gap-3">
+        <div className="rounded-2xl bg-cyan-400/10 p-3 text-cyan-300"><UserRound className="w-6 h-6" /></div>
+        <div className="min-w-0 flex-1"><p className="text-xs text-slate-400 mb-1">Mi cuenta</p><h2 className="text-xl font-semibold break-words">Hola {accountName}</h2></div>
+        <button aria-label="Cerrar perfil" disabled={saving} onClick={onClose} className="p-2 rounded-xl bg-slate-800/70"><X className="w-5 h-5" /></button>
       </div>
-    </div>
-  );
+      <div className="p-5 overflow-y-auto min-h-0 space-y-4">
+        {loading ? <p className="flex items-center gap-2 text-cyan-200"><LoaderCircle className="w-4 h-4 animate-spin" />Cargando su perfil...</p> : editing ? <form id="account-profile-form" onSubmit={save} className="space-y-4">
+          {(Object.keys(labels) as (keyof Profile)[]).map(key => <label key={key} className="block text-sm text-slate-300">{labels[key]}
+            <input name={key} autoComplete={key === 'firstName' ? 'given-name' : key === 'lastName' ? 'family-name' : 'off'} inputMode={key === 'nationalId' ? 'numeric' : 'text'} pattern={key === 'nationalId' ? '[0-9]{10}' : undefined} maxLength={key === 'nationalId' ? 10 : 120} value={draft[key]} onChange={event => setDraft(old => ({ ...old, [key]: event.target.value }))} className="block mt-1.5 w-full rounded-xl bg-[#011428] border border-[#34546a] px-3 py-3 text-white outline-none focus:border-cyan-400" />
+          </label>)}
+          <p className="text-xs text-slate-400 leading-relaxed">Estos datos describen su perfil. Los permisos y las unidades asignadas siguen siendo los de su cuenta Ceiba.</p>
+        </form> : <>
+          {filled.length ? <dl className="space-y-4">{filled.map(key => <div key={key} className="rounded-xl border border-[#293a50] bg-[#011428] p-3"><dt className="text-xs text-slate-400 mb-1">{labels[key]}</dt><dd className="text-sm font-medium break-words">{profile[key]}</dd></div>)}</dl> : <p className="text-sm text-slate-400">Puede agregar sus datos desde Editar.</p>}
+          <div className="rounded-xl border border-cyan-700/30 bg-cyan-500/5 p-3 text-sm">{isAdministrator ? 'Cuenta administradora' : 'Unidades asignadas a esta cuenta'}<span className="block text-xs text-slate-400 mt-1">{unitsCount} unidades autorizadas{isAdministrator ? ' · El acceso administrativo no acredita propiedad.' : ''}</span></div>
+        </>}
+        {error && <p role="alert" className="rounded-xl bg-rose-500/10 p-3 text-sm text-rose-300">{error}</p>}
+        {saved && <p role="status" className="flex items-center gap-2 text-emerald-300 text-sm"><Check className="w-4 h-4" />Perfil guardado</p>}
+      </div>
+      <div className="p-4 border-t border-[#293a50] flex flex-wrap gap-2">
+        {editing ? <><button key="save-profile" form="account-profile-form" type="submit" disabled={saving} className="flex-1 rounded-xl bg-cyan-400 text-[#00131f] px-4 py-3 font-semibold disabled:opacity-60">{saving ? 'Guardando...' : 'Guardar cambios'}</button><button key="cancel-profile" type="button" disabled={saving} onClick={() => { setDraft(profile); setEditing(false); setError(''); }} className="rounded-xl bg-slate-800 px-4 py-3">Cancelar</button></> : <><button key="edit-profile" type="button" disabled={loading || Boolean(error)} onClick={() => { setEditing(true); setSaved(false); }} className="rounded-xl border border-cyan-700 px-4 py-3 flex items-center gap-2 text-cyan-200 disabled:opacity-50"><Pencil className="w-4 h-4" />Editar</button><button onClick={onLogout} className="flex-1 rounded-xl bg-rose-500/10 border border-rose-900/70 text-rose-300 px-3 py-3 flex items-center justify-center gap-2 text-sm"><LogOut className="w-4 h-4" />Salir / Cambiar usuario</button></>}
+      </div>
+    </section>
+  </div>, document.body);
 };

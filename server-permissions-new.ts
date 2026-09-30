@@ -1,3 +1,4 @@
+import { registerAccountProfile } from './server/account-profile';
 import express from 'express';
 import { registerAdminDownloader } from './server/admin-downloader';
 import path from 'path';
@@ -192,24 +193,21 @@ async function startServer() {
   app.post('/api/auth/login', async (req, res) => {
     try {
       const { username, password } = req.body;
-      if (!username || !password) return res.json({ code: 201, error: 'Missing credentials' });
+      if (typeof username !== 'string' || typeof password !== 'string' || !username || !password || username.length > 100 || password.length > 200) return res.status(400).json({ code: 400, result: false, error: 'Usuario y contrasena requeridos' });
 
       if (isDbConnected()) {
         try {
           const sha1pwd = crypto.createHash('sha1').update(password).digest('hex').toUpperCase();
           const despwd = desEncrypt(password);
           const rows = await executeQuery<any>(
-            'SELECT a.id, b.roleid, a.username AS account, a.validend FROM registerlogin AS a INNER JOIN userinfo AS b ON a.id = b.registerloginid WHERE a.username = ? AND (a.userpassword = ? OR a.userpassword = ?)',
+            'SELECT a.id, b.roleid, a.username AS account, DATE_FORMAT(a.validend, \'%Y-%m-%d\') AS validend FROM registerlogin AS a INNER JOIN userinfo AS b ON a.id = b.registerloginid WHERE a.username = ? AND (a.userpassword = ? OR a.userpassword = ?)',
             [username, sha1pwd, despwd]
           );
           if (rows && rows.length > 0) {
             const user = rows[0];
-            if (user.validend) {
-              const now = new Date();
-              const ve = new Date(user.validend + ' 23:59:59');
-              if (ve.getTime() - now.getTime() < 0) {
-                return res.json({ code: 206, result: false, error: 'Cuenta expirada' });
-              }
+            const today = new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Guayaquil' });
+            if (user.validend && String(user.validend).slice(0, 10) < today) {
+              return res.status(403).json({ code: 403, result: false, error: 'Cuenta expirada' });
             }
             const token = jwt.sign({ uid: user.id, rid: user.roleid, un: user.account }, JWT_SECRET, { expiresIn: '24h' });
             return res.json({ code: 200, result: true, token, user: { uid: user.id, account: user.account, roleid: user.roleid } });
@@ -301,6 +299,7 @@ async function startServer() {
     }
   }
 
+  registerAccountProfile(app, JWT_SECRET);
   registerAdminDownloader(app, JWT_SECRET, requireAppAuth);
 
   // Apply Ceiba II account permissions to every fleet endpoint below.

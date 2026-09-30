@@ -330,7 +330,7 @@ async function loadVehiclesFromRealSource() {
         speed: rawToKmh(p.s),
         heading: p.c ? Math.round(p.c / 100) : 0,
         timestamp: p.t || 0,
-        altitude: p.h || 0,
+        altitude: p.h != null && p.h !== '' && Number.isFinite(Number(p.h)) ? Number(p.h) : null,
         ignition: !!p.v,
         humanTime: p.t ? new Date(p.t * 1000).toLocaleTimeString('es-EC', { timeZone: 'America/Guayaquil' }) : '',
       });
