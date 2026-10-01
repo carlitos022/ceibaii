@@ -4,7 +4,7 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { Bus, CalendarDays, ChevronDown, Crosshair, Layers3, Minus, Pause, Play, Plus, RotateCcw, Search, SkipBack, SkipForward, ListFilter, Tag, Gauge, Power, Clock3, Maximize2, Minimize2, X } from 'lucide-react';
 import { Vehicle } from '../types';
-import { buildPlaybackTimeline, toPlaybackClock, fromPlaybackClock, PLAYBACK_BASE_RATE, advancePlayback, eventPosition, playbackPosition, pointIndex } from '../lib/recorrido-playback';
+import { playbackRateText, playbackRemainingText, PLAYBACK_BASE_RATE, advancePlayback, eventPosition, playbackPosition, pointIndex } from '../lib/recorrido-playback';
 
 type Point = { time: string; stamp: number; lat: number; lng: number; speed: number | null; heading: number | null };
 type History = { unitNumber: string; from: string; to: string; totalRecords: number; sampled: boolean; points: Point[] };
@@ -78,9 +78,12 @@ export function RecorridoView({ vehicles, token, initialSelection, chromeHidden,
   useEffect(() => { if (!vehicles.some(v => v.id === vehicleId)) { setVehicleId(sorted[0]?.id || ''); setHistory(null); setPlaying(false); } }, [vehicles, sorted, vehicleId]);
   const points = history?.points || [];
   const first = points[0]?.stamp || 0, last = points[points.length - 1]?.stamp || 0;
-  const playbackTimeline = useMemo(() => buildPlaybackTimeline(points), [points]);
+  const animationCursor = useRef(cursor);
+  useEffect(() => { animationCursor.current = cursor; }, [cursor]);
   const currentIndex = useMemo(() => pointIndex(points, cursor), [points, cursor]);
   const current = points[currentIndex];
+  const nextPoint = points[currentIndex + 1];
+  const estimatedTransition = !!(current && nextPoint && cursor > current.stamp && nextPoint.stamp - current.stamp > 120000);
   const eventTypes = useMemo(() => Array.from(new Set(events.map(event => event.event_type))), [events]);
   const filteredEvents = useMemo(() => events.filter(event => eventFilter === 'all' || event.event_type === eventFilter), [events, eventFilter]);
   const distance = useMemo(() => {
@@ -170,41 +173,45 @@ export function RecorridoView({ vehicles, token, initialSelection, chromeHidden,
   useEffect(() => {
     if (!marker.current || !current) return;
     const position = !playing && eventFocus ? eventFocus : playbackPosition(points, cursor);
-    if (position) marker.current.setLatLng([position.lat, position.lng]);
+    if (position && !playing) marker.current.setLatLng([position.lat, position.lng]);
     const now = performance.now();
     const refresh = !playing || now - lastDraw.current > 90 || currentIndex === points.length - 1;
     if (playedRoute.current && currentIndex !== drawnIndex.current && refresh) {
       playedRoute.current.setLatLngs(points.slice(0, currentIndex + 1).map(p => [p.lat, p.lng] as [number, number]));
       drawnIndex.current = currentIndex; lastDraw.current = now;
-      if (playing && followRef.current && map.current && now - lastPan.current > 450) {
-        const view = map.current, projected = view.latLngToContainerPoint([current.lat, current.lng]);
-        const size = view.getSize();
-        if (projected.x < size.x * .18 || projected.x > size.x * .82 || projected.y < size.y * .18 || projected.y > size.y * .82) {
-          lastPan.current = now;
-          view.panTo([current.lat, current.lng], { animate: true, duration: .4 });
-        }
-      }
+
     }
   }, [cursor, currentIndex, history, playing, eventFocus]);
   useEffect(() => {
     if (!playing || !points.length) return;
     let frame = 0;
     const startedAt = performance.now();
-    const startCursor = toPlaybackClock(playbackTimeline, cursor);
-    const endClock = playbackTimeline[playbackTimeline.length - 1].clock;
-    let lastPaint = 0;
+    const startCursor = animationCursor.current;
+    let lastPaint = 0, lastMarkerPaint = 0;
     const tick = (now: number) => {
-      // El reloj real define la velocidad; los fotogramas lentos no reducen x6 ni x10.
-      const position = advancePlayback(startCursor, now - startedAt, speed * PLAYBACK_BASE_RATE, endClock);
-      if (now - lastPaint >= 50 || position >= endClock) {
-        setCursor(fromPlaybackClock(playbackTimeline, position));
-        lastPaint = now;
+      const position = advancePlayback(startCursor, now - startedAt, speed * PLAYBACK_BASE_RATE, last);
+      animationCursor.current = position;
+      // Move Leaflet directly at 30 fps; update React controls only 10 times per second.
+      if (now - lastMarkerPaint >= 32 || position >= last) {
+        const gps = playbackPosition(points, position);
+        if (gps) {
+          marker.current?.setLatLng([gps.lat, gps.lng]);
+          if (followRef.current && map.current && now - lastPan.current > 450) {
+            const view = map.current, projected = view.latLngToContainerPoint([gps.lat, gps.lng]), size = view.getSize();
+            if (projected.x < size.x * .18 || projected.x > size.x * .82 || projected.y < size.y * .18 || projected.y > size.y * .82) {
+              lastPan.current = now;
+              view.panTo([gps.lat, gps.lng], { animate: true, duration: .35 });
+            }
+          }
+        }
+        lastMarkerPaint = now;
       }
-      if (position < endClock) frame = requestAnimationFrame(tick);
+      if (now - lastPaint >= 100 || position >= last) { setCursor(position); lastPaint = now; }
+      if (position < last) frame = requestAnimationFrame(tick);
     };
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
-  }, [playing, points, first, last, speed, playbackTimeline]);
+  }, [playing, points, first, last, speed]);
   useEffect(() => { if (playing && cursor >= last) setPlaying(false); }, [playing, cursor, last]);
   const jump = (direction: number) => { if (!points.length) return; setEventFocus(null); setPlaying(false); const point = points[Math.max(0, Math.min(points.length - 1, currentIndex + direction))]; setCursor(point.stamp); map.current?.panTo([point.lat, point.lng]); };
   useEffect(() => {
@@ -256,6 +263,7 @@ export function RecorridoView({ vehicles, token, initialSelection, chromeHidden,
         {!fullscreen && <button aria-label="Acercar mapa" onClick={() => map.current?.zoomIn()} className="rounded-xl bg-[#102337] border border-[#34546a] p-2.5 shadow-lg"><Plus className="w-5 h-5" /></button>}
         {!fullscreen && <button aria-label="Alejar mapa" onClick={() => map.current?.zoomOut()} className="rounded-xl bg-[#102337] border border-[#34546a] p-2.5 shadow-lg"><Minus className="w-5 h-5" /></button>}
       </div>
+      {estimatedTransition && !eventFocus && <div role="status" aria-label="Transicion GPS estimada" className="absolute left-2 top-2 right-16 z-[500] max-w-sm rounded-lg border border-amber-600/60 bg-[#102337]/95 px-3 py-2 text-[11px] text-amber-200 pointer-events-none">Transicion estimada · sin reportes GPS entre {timeText(current.stamp)} y {timeText(nextPoint.stamp)}. El trayecto exacto no esta registrado.</div>}
       {eventFocus && <div role="status" aria-label="Evento seleccionado en el mapa" className="absolute left-2 top-2 right-16 z-[500] max-w-sm rounded-xl border border-amber-400 bg-[#102337]/95 p-3 text-xs shadow-xl">
         <button type="button" aria-label="Quitar evento seleccionado" onClick={() => setEventFocus(null)} className="float-right p-1"><X className="h-4 w-4" /></button>
         <strong className="block text-amber-300">{eventLabel(eventFocus.event)}</strong>
@@ -266,19 +274,19 @@ export function RecorridoView({ vehicles, token, initialSelection, chromeHidden,
       {history?.points.length === 0 && <div className="absolute left-2 right-14 top-2 z-[500] rounded-xl border border-[#34546a] bg-[#102337]/95 p-3 text-xs"><p>El CMS no guardó posiciones GPS para esta unidad en el horario elegido.</p>{recentDay && recentDay.date !== fromDate && <button onClick={() => { setFromDate(recentDay.date); setToDate(recentDay.date); setFromTime('00:00'); setToTime('23:59'); void consult({ vehicleId, date: recentDay.date, fromTime: '00:00', toTime: '23:59' }); }} className="mt-2 rounded-lg bg-cyan-700 px-2 py-1.5 font-semibold text-white">Ver último día disponible: {recentDay.date}</button>}</div>}
       {!fullscreen && history && points.length > 0 && <div className="absolute left-2 bottom-2 z-[500] max-w-[70%] rounded-xl border border-[#34546a] bg-[#102337]/95 p-2 text-[11px] shadow-xl">
         <div className="font-semibold text-cyan-200">{currentVehicle?.unitNumber} · {timeText(cursor)}</div>
-        <div className="text-slate-300">{current?.speed ?? '—'} km/h · {distance.toFixed(1)} km aprox. · {currentIndex + 1}/{points.length} puntos · {history.totalRecords} registros{history.sampled ? ' (muestra real)' : ''}</div>
+        <div className="text-slate-300">{estimatedTransition ? 'Velocidad no registrada' : (current?.speed ?? '—') + ' km/h'} · {distance.toFixed(1)} km aprox. · {currentIndex + 1}/{points.length} puntos · {history.totalRecords} registros{history.sampled ? ' (muestra real)' : ''}</div>
       </div>}
     </div>
-    <div className={fullscreen ? 'shrink-0 border-t border-[#34546a] bg-[#102337]/95 px-2 py-1 pb-[max(8px,env(safe-area-inset-bottom))]' : 'shrink-0 border-t border-[#34546a] bg-[#102337] px-3 pt-2 pb-2 max-h-[140px]'}>
+    <div className={fullscreen ? 'shrink-0 border-t border-[#34546a] bg-[#102337]/95 px-2 py-1 pb-[max(8px,env(safe-area-inset-bottom))]' : 'shrink-0 border-t border-[#34546a] bg-[#102337] px-3 pt-2 pb-2 '}>
       <div className="mx-auto max-w-5xl">
         <div className="flex items-center gap-2 justify-between">
           <div className="flex items-center gap-1">
-            <button aria-label={playing ? 'Pausar' : 'Reproducir'} disabled={!points.length} onClick={() => { setEventFocus(null); if (!playing && points.length) { const point = cursor >= last ? points[0] : current; if (point && followRef.current) map.current?.panTo([point.lat, point.lng]); if (cursor >= last) setCursor(first); } setPlaying(p => !p); }} className="p-2 rounded-lg text-cyan-200 disabled:opacity-40">{playing ? <Pause className="h-5 w-5" /> : <Play className="h-5 w-5" />}</button>
+            <button aria-label={playing ? 'Pausar' : 'Reproducir'} disabled={!points.length} onClick={() => { setEventFocus(null); if (!playing && points.length) { const point = cursor >= last ? points[0] : current; if (point && followRef.current) map.current?.panTo([point.lat, point.lng]); if (cursor >= last) setCursor(first); } if (playing) setCursor(animationCursor.current); setPlaying(p => !p); }} className="p-2 rounded-lg text-cyan-200 disabled:opacity-40">{playing ? <Pause className="h-5 w-5" /> : <Play className="h-5 w-5" />}</button>
             <button aria-label="Reiniciar" disabled={!points.length} onClick={() => { setEventFocus(null); setPlaying(false); setCursor(first); }} className="p-2 disabled:opacity-40"><RotateCcw className="h-4 w-4" /></button>
             <button aria-label="Punto anterior" disabled={!points.length} onClick={() => jump(-1)} className="p-2 disabled:opacity-40"><SkipBack className="h-4 w-4" /></button>
             <button aria-label="Punto siguiente" disabled={!points.length} onClick={() => jump(1)} className="p-2 disabled:opacity-40"><SkipForward className="h-4 w-4" /></button>
           </div>
-          <div className="text-right"><label title="Escala acelerada: x1 equivale a cinco minutos del historial por segundo real" className="text-xs text-slate-300 flex items-center gap-1">Velocidad<select aria-label="Velocidad de reproducción" value={speed} onChange={e => setSpeed(Number(e.target.value))} className="rounded-lg border border-[#34546a] bg-[#071626] p-1 text-xs text-white">{[1, 3, 6, 10, 20].map(value => <option value={value} key={value}>×{value}</option>)}</select></label><span className="block mt-0.5 text-[9px] text-slate-400">Base x1: 5 min/s</span><span className="block text-[9px] text-slate-400">Huecos GPS abreviados</span></div>
+          <div className="min-w-0 text-right"><label className="text-xs text-slate-300 flex items-center justify-end gap-1">Ritmo<select aria-label="Velocidad de reproducción" value={speed} onChange={e => { if (playing) setCursor(animationCursor.current); setSpeed(Number(e.target.value)); }} className="min-h-9 rounded-lg border border-[#34546a] bg-[#071626] px-2 text-xs text-white">{[1, 3, 6, 10, 20].map(value => <option value={value} key={value}>×{value} · {PLAYBACK_BASE_RATE * value / 60} min/s</option>)}</select></label><span className="block mt-0.5 text-[10px] text-cyan-200">{playbackRateText(speed)}</span><span className="block text-[9px] text-slate-400">{points.length ? 'Restante: ' + playbackRemainingText(last - cursor, speed) : 'Tiempo completo, sin saltos'}</span></div>
         </div>
         {!fullscreen && <div className="relative h-8 overflow-hidden rounded bg-[#071626] flex items-end gap-px px-1">{chart.map((n, i) => <div key={i} style={{ height: Math.max(2, Math.min(28, n / 100 * 28)) }} className={n > 0 ? 'flex-1 bg-cyan-500/65' : 'flex-1 bg-slate-700/50'} />)}</div>}
         <input aria-label="Línea de tiempo del recorrido" type="range" min={first} max={Math.max(first + 1, last)} step="1000" value={cursor || first} disabled={!points.length} onChange={e => { setEventFocus(null); setPlaying(false); setCursor(Number(e.target.value)); }} className="w-full h-3 accent-[#00d1ff] disabled:opacity-40" />

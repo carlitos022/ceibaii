@@ -18,10 +18,10 @@ export function playbackPosition(points: TimedPosition[], stamp: number) {
   if (!points.length) return null;
   const index = pointIndex(points, stamp), a = points[index], b = points[index + 1];
   if (!validPosition(a.lat, a.lng)) return null;
-  if (!b || !validPosition(b.lat, b.lng) || b.stamp <= a.stamp || b.stamp - a.stamp > 120000) return a;
-  // Never animate through missing reports or large GPS jumps.
+  if (!b || !validPosition(b.lat, b.lng) || b.stamp <= a.stamp) return a;
+  // Preserve elapsed time, including long intervals. Only reject implausible short GPS jumps.
   const distance = Math.hypot((b.lat - a.lat) * 111, (b.lng - a.lng) * 111 * Math.cos(a.lat * Math.PI / 180));
-  if (distance > 3) return a;
+  if (distance > 3 && b.stamp - a.stamp <= 120000) return a;
   const ratio = Math.max(0, Math.min(1, (stamp - a.stamp) / (b.stamp - a.stamp)));
   return { stamp, lat: a.lat + (b.lat - a.lat) * ratio, lng: a.lng + (b.lng - a.lng) * ratio };
 }
@@ -37,7 +37,7 @@ export type PlaybackEntry = { stamp: number; clock: number };
 export function buildPlaybackTimeline(points: { stamp: number }[]): PlaybackEntry[] {
   let clock = 0;
   return points.map((point, index) => {
-    if (index) clock += Math.min(120000, Math.max(0, point.stamp - points[index - 1].stamp));
+    if (index) clock += Math.max(0, point.stamp - points[index - 1].stamp);
     return { stamp: point.stamp, clock };
   });
 }
@@ -56,4 +56,11 @@ export function fromPlaybackClock(timeline: PlaybackEntry[], clock: number) {
   if (!b || b.clock <= a.clock) return a.stamp;
   const ratio = Math.max(0, Math.min(1, (clock - a.clock) / (b.clock - a.clock)));
   return a.stamp + ratio * (b.stamp - a.stamp);
+}
+export function playbackRateText(multiplier: number) {
+  return (PLAYBACK_BASE_RATE * multiplier / 60) + ' min de historial / s';
+}
+export function playbackRemainingText(remainingMs: number, multiplier: number) {
+  const seconds = Math.ceil(Math.max(0, remainingMs) / (PLAYBACK_BASE_RATE * multiplier * 1000));
+  return seconds >= 60 ? Math.floor(seconds / 60) + ' min ' + seconds % 60 + ' s' : seconds + ' s';
 }
